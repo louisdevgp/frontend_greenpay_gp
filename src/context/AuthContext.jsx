@@ -2,13 +2,36 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clearAuth, getAuth, login as apiLogin, me as apiMe, setAuth } from "../services/auth.service";
 
-const AuthContext = createContext(null);
+/**
+ * @typedef {{
+ *  accessToken?: string,
+ *  refreshToken?: string,
+ *  user?: any,
+ *  mustChangePassword?: boolean,
+ *  persist?: boolean
+ * }} AuthState
+ */
+
+/**
+ * @typedef {{
+ *  loading: boolean,
+ *  isAuthenticated: boolean,
+ *  auth: (AuthState|null),
+ *  user: any,
+ *  roles: string[],
+ *  login: (args: { email: string, password: string, persist?: boolean }) => Promise<AuthState>,
+ *  logout: () => void,
+ *  refreshMe: () => Promise<any>,
+ *  hasRole: (roleName: string) => boolean,
+ *  hasAnyRole: (roleList?: string[]) => boolean
+ * }} AuthContextValue
+ */
+
+const AuthContext = createContext(/** @type {AuthContextValue|null} */ (null));
 
 export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
-  const [auth, setAuthState] = useState(() => getAuth()); // { accessToken, refreshToken, user }
-
-  console.log("Auth state initialized:", auth);
+  const [auth, setAuthState] = useState(() => getAuth()); // { accessToken, refreshToken, user, mustChangePassword? }
 
   const isAuthenticated = !!auth?.accessToken;
   const user = auth?.user || null;
@@ -25,15 +48,26 @@ export function AuthProvider({ children }) {
         }
 
         // Vérifie le token et récupère user propre via /me
-        const res = await apiMe(); // { success, data }
-        if (res?.success && res?.data) {
-          const updatedUser = res.data;
-          const next = { ...persisted, user: updatedUser };
-          setAuth(next);
-          setAuthState(next);
-        } else {
-          clearAuth();
-          setAuthState(null);
+        try {
+          const res = await apiMe(); // { success, data }
+          if (res?.success && res?.data) {
+            const updatedUser = res.data;
+            const next = { ...persisted, user: updatedUser };
+            setAuth(next);
+            setAuthState(next);
+          } else {
+            clearAuth();
+            setAuthState(null);
+          }
+        } catch (e) {
+          // If backend requires password change, keep auth in storage
+          if (e?.status === 403 && String(e?.message) === "PASSWORD_CHANGE_REQUIRED") {
+            const next = { ...persisted, mustChangePassword: true };
+            setAuth(next);
+            setAuthState(next);
+          } else {
+            throw e;
+          }
         }
       } catch (e) {
         // token invalide / expiré / réseau
@@ -63,6 +97,7 @@ export function AuthProvider({ children }) {
       accessToken: payload.accessToken,
       refreshToken: payload.refreshToken,
       user: payload.user,
+      mustChangePassword: !!payload.mustChangePassword,
       persist,
     };
 

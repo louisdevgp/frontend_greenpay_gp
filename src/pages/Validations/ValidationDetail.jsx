@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { getValidationByUuid, listValidationsPending } from "../../services/validations.service";
 import { listDocuments } from "../../services/documents.service";
 import ValidationActionModal from "./ValidationActionModal";
+import { labelDemandeStatut } from "../../utils/statusLabels";
 
 function formatMoney(v) {
   const n = Number(v ?? 0);
@@ -40,8 +41,7 @@ export default function ValidationDetail() {
   // ✅ “actionnable” : adapte selon ton backend
   const isPending = useMemo(() => {
     const s = String(validation?.status || validation?.statut || validation?.state || "").toLowerCase();
-    // si ton backend renvoie un champ précis, on ajustera
-    return s.includes("pending") || s.includes("en_attente") || s.includes("waiting") || s === "";
+    return s === "en_attente";
   }, [validation]);
 
   const fetchValidation = async () => {
@@ -150,7 +150,7 @@ export default function ValidationDetail() {
           <Info label="Motif" value={demande?.motif || "-"} />
           <Info label="Bénéficiaire" value={demande?.beneficiaire || "-"} />
           <Info label="Montant" value={`${formatMoney(demande?.montant)} FCFA`} />
-          <Info label="Statut demande" value={demande?.statut || "-"} />
+          <Info label="Statut demande" value={labelDemandeStatut(demande?.statut)} />
           <Info label="Créée" value={formatDateTime(demande?.created_at)} />
         </div>
 

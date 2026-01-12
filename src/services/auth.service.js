@@ -15,8 +15,22 @@ export async function me() {
   return res.data; // { success, message, data }
 }
 
+export async function changePassword({ oldPassword, newPassword }) {
+  const res = await api.patch("/auth/change-password", { oldPassword, newPassword });
+  return res.data;
+}
+
+export async function forgotPassword({ email }) {
+  const res = await api.post("/auth/forgot-password", { email });
+  return res.data;
+}
+
+export async function resetPassword({ token, newPassword }) {
+  const res = await api.post("/auth/reset-password", { token, newPassword });
+  return res.data;
+}
+
 export function getAuth() {
-  console.log("Reading auth from storage with key:", STORAGE_KEYS.AUTH);
   return readStorage(STORAGE_KEYS.AUTH, null);
 }
 

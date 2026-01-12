@@ -2,6 +2,9 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 
 import SignIn from "./pages/AuthPages/SignIn";
 import SignUp from "./pages/AuthPages/SignUp";
+import ChangePassword from "./pages/AuthPages/ChangePassword";
+import ForgotPassword from "./pages/AuthPages/ForgotPassword";
+import ResetPassword from "./pages/AuthPages/ResetPassword";
 import NotFound from "./pages/OtherPage/NotFound";
 
 import UserProfiles from "./pages/UserProfiles";
@@ -26,6 +29,7 @@ import Home from "./pages/Dashboard/Home";
 import AuthGuard from "./guards/AuthGuard.jsx";
 import GuestGuard from "./guards/GuestGuard.jsx";
 import RoleGuard from "./guards/RoleGuard.jsx";
+import ForcePasswordChangeGuard from "./guards/ForcePasswordChangeGuard.jsx";
 
 // modules métier
 import PaiementsList from "./pages/Paiements/PaiementsList";
@@ -37,6 +41,15 @@ import CreateDemande from "./pages/Demandes/CreateDemande";
 import ValidationsDone from "./pages/Validations/ValidationsDone";
 import ValidationsPending from "./pages/Validations/ValidationsPending";
 import ValidationDetail from "./pages/Validations/ValidationDetail";
+import ReceptionsList from "./pages/Receptions/ReceptionsList";
+import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
+import BonCommandeDetail from "./pages/BonsCommande/BonCommandeDetail";
+
+// admin
+import UsersAdmin from "./pages/Admin/UsersAdmin";
+import AgentsAdmin from "./pages/Admin/AgentsAdmin";
+import HierarchyAdmin from "./pages/Admin/HierarchyAdmin";
+import DelegationsAdmin from "./pages/Admin/DelegationsAdmin";
 
 
 // (optionnel) page 403
@@ -57,63 +70,82 @@ export default function App() {
         <Route element={<GuestGuard />}>
           <Route path="/signin" element={<SignIn />} />
           <Route path="/signup" element={<SignUp />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
         </Route>
 
         {/* ---------------- APP (auth required) ---------------- */}
         <Route element={<AuthGuard />}>
-          <Route element={<AppLayout />}>
-            {/* Home accessible à tous les connectés */}
-            <Route index path="/" element={<Home />} />
+          <Route element={<ForcePasswordChangeGuard />}>
+            <Route element={<AppLayout />}>
+              {/* Home accessible à tous les connectés */}
+              <Route index path="/" element={<Home />} />
 
-            {/* Exemple pages communes */}
-            <Route path="/profile" element={<UserProfiles />} />
-            <Route path="/calendar" element={<Calendar />} />
-            <Route path="/blank" element={<Blank />} />
+              <Route path="/change-password" element={<ChangePassword />} />
+
+              {/* Exemple pages communes */}
+              <Route path="/profile" element={<UserProfiles />} />
+              <Route path="/calendar" element={<Calendar />} />
+              <Route path="/blank" element={<Blank />} />
 
             {/* ---------------- MODULES METIER PROTEGES PAR ROLES ---------------- */}
 
-            {/* Paiements : COMPTABLE + DAF + ADMIN */}
-            <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "ADMIN"]} />}>
-              <Route path="/paiements" element={<PaiementsList />} />
-              <Route path="/paiements/:uuid" element={<PaiementDetail />} />
+              {/* Paiements/Réceptions : COMPTABLE + DAF + DIRECTEUR + ADMIN */}
+              <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "DIRECTEUR", "ADMIN"]} />}>
+                <Route path="/paiements" element={<PaiementsList />} />
+                <Route path="/paiements/:uuid" element={<PaiementDetail />} />
+                <Route path="/receptions" element={<ReceptionsList />} />
+                <Route path="/receptions/:uuid" element={<ReceptionDetail />} />
+              </Route>
+
+              {/* Demandes (toutes) : DIRECTEUR + DG + DGA + DAF + ADMIN */}
+              <Route element={<RoleGuard allow={["RESPONSABLE","DEMANDEUR", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN", "COMPTABLE"]} />}>
+                <Route path="/demandes/all" element={<DemandesAllList />} />
+                <Route path="/demandes/my" element={<DemandesMyList />} />
+                <Route path="/demandes/:uuid" element={<DemandeDetail />} />
+                <Route path="/demandes/create" element={<CreateDemande />} />
+              </Route>
+
+              {/* Bons de commande : DEMANDEUR/RESPONSABLE/... */}
+              <Route element={<RoleGuard allow={["DEMANDEUR", "RESPONSABLE", "DIRECTEUR", "DAF", "DGA", "DG", "ADMIN"]} />}>
+                <Route path="/bons-commande/:uuid" element={<BonCommandeDetail />} />
+              </Route>
+
+              {/* Validations : RESPONSABLE + DIRECTEUR + DG + DGA + DAF + ADMIN */}
+              <Route element={<RoleGuard allow={["RESPONSABLE", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
+                <Route path="/validations/pending" element={<ValidationsPending />} />
+                <Route path="/validations/done" element={<ValidationsDone />} />
+                <Route path="/validations/uuid/:uuid" element={<ValidationDetail />} />
+              </Route>
+
+              {/* Délégations (non-admin autorisé, mais contrôlé côté API) */}
+              <Route element={<RoleGuard allow={["RESPONSABLE", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
+                <Route path="/delegations" element={<DelegationsAdmin />} />
+              </Route>
+
+              {/* Admin : ADMIN only */}
+              <Route element={<RoleGuard allow={["ADMIN"]} />}>
+                <Route path="/admin/users" element={<UsersAdmin />} />
+                <Route path="/admin/hierarchy" element={<HierarchyAdmin />} />
+                <Route path="/admin/agents" element={<AgentsAdmin />} />
+                <Route path="/admin/delegations" element={<DelegationsAdmin />} />
+              </Route>
+
+              {/* ---------------- UI/Template routes (optionnel) ---------------- */}
+              <Route path="/form-elements" element={<FormElements />} />
+              <Route path="/basic-tables" element={<BasicTables />} />
+              <Route path="/alerts" element={<Alerts />} />
+              <Route path="/avatars" element={<Avatars />} />
+              <Route path="/badge" element={<Badges />} />
+              <Route path="/buttons" element={<Buttons />} />
+              <Route path="/images" element={<Images />} />
+              <Route path="/videos" element={<Videos />} />
+              <Route path="/line-chart" element={<LineChart />} />
+              <Route path="/bar-chart" element={<BarChart />} />
+
+              {/* 403 page (optionnel) */}
+              <Route path="/403" element={<Forbidden />} />
             </Route>
-
-            {/* Demandes (toutes) : DIRECTEUR + DG + DGA + DAF + ADMIN */}
-            <Route element={<RoleGuard allow={["DEMANDEUR","DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
-              <Route path="/demandes/all" element={<DemandesAllList />} />
-              <Route path="/demandes/my" element={<DemandesMyList />} />
-              <Route path="/demandes/:uuid" element={<DemandeDetail />} />
-              <Route path="/demandes/create" element={<CreateDemande />} />
-
-            </Route>
-
-            {/* Validations : RESPONSABLE + DIRECTEUR + DG + DGA + DAF + ADMIN */}
-            <Route element={<RoleGuard allow={["RESPONSABLE", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
-              <Route path="/validations/pending" element={<ValidationsPending />} />
-              <Route path="/validations/done" element={<ValidationsDone />} />
-              <Route path="/validations/:id" element={<ValidationDetail />} />
-            </Route>
-
-            {/* Admin : ADMIN only */}
-            <Route element={<RoleGuard allow={["ADMIN"]} />}>
-              <Route path="/admin/hierarchy" element={<Blank />} />
-              <Route path="/admin/agents" element={<Blank />} />
-            </Route>
-
-            {/* ---------------- UI/Template routes (optionnel) ---------------- */}
-            <Route path="/form-elements" element={<FormElements />} />
-            <Route path="/basic-tables" element={<BasicTables />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/avatars" element={<Avatars />} />
-            <Route path="/badge" element={<Badges />} />
-            <Route path="/buttons" element={<Buttons />} />
-            <Route path="/images" element={<Images />} />
-            <Route path="/videos" element={<Videos />} />
-            <Route path="/line-chart" element={<LineChart />} />
-            <Route path="/bar-chart" element={<BarChart />} />
-
-            {/* 403 page (optionnel) */}
-            <Route path="/403" element={<Forbidden />} />
           </Route>
         </Route>
 

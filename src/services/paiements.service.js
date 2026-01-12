@@ -6,23 +6,18 @@ export async function listPaiements() {
   return res.data; // { success, data: [...] }
 }
 
-export async function getPaiement(uuid) {
-  const res = await api.get(`/paiements/${uuid}`);
+function isNumericId(v) {
+  return /^[0-9]+$/.test(String(v));
+}
+
+export async function getPaiement(idOrUuid) {
+  const path = isNumericId(idOrUuid) ? `/paiements/${idOrUuid}` : `/paiements/uuid/${idOrUuid}`;
+  const res = await api.get(path);
   return res.data; // { success, data: {...} }
 }
 
-export async function createPaiement(payload, files = []) {
-  const form = new FormData();
 
-  // champs
-  Object.entries(payload || {}).forEach(([k, v]) => {
-    if (v === undefined || v === null || v === "") return;
-    form.append(k, String(v));
-  });
-
-  // fichiers
-  files.forEach((f) => form.append("documents", f));
-
-  const res = await api.post("/paiements", form);
-  return res.data;
+export async function createPaiement(payload) {
+  const res = await api.post("/paiements/pay", payload);
+  return res.data; // { success, data: paiement }
 }

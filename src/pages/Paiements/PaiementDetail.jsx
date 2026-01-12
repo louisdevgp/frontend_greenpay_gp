@@ -1,56 +1,52 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { getPaiement } from "../../services/paiements.service";
+import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
+import { listReceptions } from "../../services/receptions.service";
+import FullscreenLoader from "../../components/common/FullScreenLoader";
+// PaiementDetail.jsx
+import CreateReceptionModal from "../Receptions/CreateReceptionModal"; // ✅ ajuste le chemin selon ton arbo
+
 
 function formatMoney(v) {
   const n = Number(v ?? 0);
   if (Number.isNaN(n)) return String(v ?? "");
   return new Intl.NumberFormat("fr-FR").format(n);
 }
-
-function formatDate(iso) {
+function formatDateTime(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
   return new Intl.DateTimeFormat("fr-FR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
   }).format(d);
-}
-
-function Badge({ children }) {
-  return (
-    <span className="inline-flex items-center px-2 py-1 text-xs border rounded-lg border-gray-200 dark:border-gray-800">
-      {children}
-    </span>
-  );
 }
 
 export default function PaiementDetail() {
   const { uuid } = useParams();
+  const nav = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [data, setData] = useState(null);
+  const [paiement, setPaiement] = useState(null);
 
-  const paiement = data;
-  const demande = data?.demandes_paiement || null;
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [openReception, setOpenReception] = useState(false);
+  const [hasReception, setHasReception] = useState(false);
 
-  const title = useMemo(() => {
-    if (!paiement) return "Paiement";
-    return `Paiement #${paiement.id}`;
-  }, [paiement]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadType, setUploadType] = useState("preuve_paiement");
+  const [uploadFiles, setUploadFiles] = useState([]);
 
-  const fetchOne = async () => {
+  const fetchPaiement = async () => {
     setLoading(true);
     setError("");
     try {
       const res = await getPaiement(uuid);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement paiement");
-      setData(res.data);
+      setPaiement(res.data);
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
     } finally {
@@ -58,165 +54,247 @@ export default function PaiementDetail() {
     }
   };
 
+  const fetchDocs = async (paiementId) => {
+    if (!paiementId) return;
+    setDocsLoading(true);
+    try {
+      const res = await listDocuments({ paiement_id: paiementId });
+      if (res?.success) setDocuments(res.data || []);
+      else setDocuments([]);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchPaiement(); }, [uuid]);
+
   useEffect(() => {
-    fetchOne();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uuid]);
+    if (paiement?.id) fetchDocs(paiement.id);
+  }, [paiement?.id]);
 
-  if (loading) {
-    return (
-      <div className="p-6 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <p className="text-sm text-gray-500 dark:text-gray-400">Chargement...</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const loadReceptionState = async () => {
+      try {
+        const demandeId = paiement?.demande_id;
+        if (!demandeId) {
+          setHasReception(false);
+          return;
+        }
 
-  if (error) {
-    return (
-      <div className="space-y-3">
-        <div className="p-6 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        </div>
-        <button
-          type="button"
-          onClick={fetchOne}
-          className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
-        >
-          Réessayer
-        </button>
-      </div>
-    );
-  }
+        const res = await listReceptions({ demande_id: demandeId });
+        const rows = res?.success ? (res.data || []) : [];
+        setHasReception(Array.isArray(rows) && rows.length > 0);
+      } catch {
+        // ne bloque pas la page
+        setHasReception(false);
+      }
+    };
 
-  if (!paiement) {
-    return (
-      <div className="p-6 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <p className="text-sm text-gray-500 dark:text-gray-400">Aucune donnée.</p>
-      </div>
-    );
-  }
+    if (paiement?.id) loadReceptionState();
+  }, [paiement?.id, paiement?.demande_id]);
+
+  const doUpload = async () => {
+    if (!paiement?.id) return;
+    setUploadError("");
+    try {
+      if (!uploadFiles?.length) throw new Error("Veuillez choisir au moins un fichier");
+      setUploading(true);
+      const res = await uploadManyDocuments({
+        files: uploadFiles,
+        type_document: uploadType,
+        paiement_id: paiement.id,
+      });
+      if (!res?.success) throw new Error(res?.message || "Upload échoué");
+      setUploadFiles([]);
+      await fetchDocs(paiement.id);
+    } catch (e) {
+      setUploadError(e?.message || "Erreur upload");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">{title}</h1>
-            <Badge>{paiement.moyen_paiement || "-"}</Badge>
-            <Badge>{paiement.type_paiement || "-"}</Badge>
+      <FullscreenLoader show={loading} label="Chargement du paiement..." />
+
+      {error ? (
+        <div className="p-4 space-y-3">
+          <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+            {error}
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            UUID: <span className="font-mono">{paiement.uuid}</span>
-          </p>
-        </div>
-
-        <div className="flex gap-2">
-          <Link
-            to="/paiements"
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
-          >
+          <button onClick={() => nav(-1)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
             Retour
-          </Link>
-
-          <button
-            type="button"
-            onClick={fetchOne}
-            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
-          >
-            Rafraîchir
           </button>
         </div>
-      </div>
+      ) : null}
 
-      {/* Cards */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Paiement */}
-        <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800 lg:col-span-2">
-          <h2 className="mb-3 text-sm font-semibold text-gray-800 dark:text-white/90">
-            Informations paiement
-          </h2>
+      {!error && paiement ? (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Détail paiement</h1>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                UUID: <span className="font-mono">{paiement.uuid}</span>
+              </p>
+            </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Info label="Montant" value={`${formatMoney(paiement.montant)} FCFA`} />
-            <Info label="Date paiement" value={formatDate(paiement.date_paiement)} />
-            <Info label="Demande ID" value={paiement.demande_id} />
-            <Info label="Comptable ID" value={paiement.comptable_id ?? "-"} />
-            <Info label="Référence pièce" value={paiement.reference_piece ?? "-"} />
-            <Info label="Compte débité" value={paiement.compte_debite ?? "-"} />
-          </div>
-
-          <div className="mt-3">
-            <div className="text-xs text-gray-500 dark:text-gray-400">Commentaire</div>
-            <div className="mt-1 text-sm text-gray-800 dark:text-white/90">
-              {paiement.commentaire || "-"}
+            <div className="flex gap-2">
+              <button onClick={() => nav(-1)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
+                Retour
+              </button>
+              <button
+                onClick={fetchPaiement}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+              >
+                Rafraîchir
+              </button>
+              {/* ✅ Créer réception depuis paiement */}
+              <button
+                type="button"
+                disabled={hasReception}
+                onClick={() => !hasReception && setOpenReception(true)}
+                className={`px-4 py-2 text-sm rounded-lg ${
+                  hasReception ? "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500" : "bg-emerald-600 text-white hover:opacity-90"
+                }`}
+              >
+                {hasReception ? "Réception déjà créée" : "Créer réception"}
+              </button>
             </div>
           </div>
-        </div>
 
-        {/* Documents */}
-        <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-          <h2 className="mb-3 text-sm font-semibold text-gray-800 dark:text-white/90">Documents</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Info label="Type" value={paiement.type_paiement} />
+            <Info label="Montant" value={`${formatMoney(paiement.montant)} FCFA`} />
+            <Info label="Moyen" value={paiement.moyen_paiement} />
+            <Info label="Date paiement" value={formatDateTime(paiement.date_paiement)} />
+            <Info label="Créé" value={formatDateTime(paiement.created_at)} />
+            <Info label="Référence" value={paiement.reference_piece || "-"} />
+          </div>
 
-          {Array.isArray(paiement.documents) && paiement.documents.length > 0 ? (
-            <ul className="space-y-2">
-              {paiement.documents.map((doc, idx) => (
-                <li key={idx} className="p-2 text-sm border rounded-lg border-gray-200 dark:border-gray-800">
-                  {/* Si plus tard doc = {url, type, name...} on affichera proprement */}
-                  <pre className="text-xs whitespace-pre-wrap break-words">
-                    {JSON.stringify(doc, null, 2)}
-                  </pre>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Aucun document attaché.
-            </p>
-          )}
-        </div>
-      </div>
+          {/* Lien demande si dispo */}
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Demande liée</div>
+            <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              UUID:{" "}
+              <span className="font-mono">
+                {paiement?.demandes_paiement?.uuid || paiement?.demande_uuid || "-"}
+              </span>
+            </div>
+            {paiement?.demandes_paiement?.uuid ? (
+              <div className="mt-3">
+                <Link
+                  to={`/demandes/${paiement.demandes_paiement.uuid}`}
+                  className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+                >
+                  Voir la demande
+                </Link>
+              </div>
+            ) : null}
+          </div>
 
-      {/* Demande associée */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-gray-800 dark:text-white/90">
-            Demande associée
-          </h2>
+          {/* Documents */}
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Documents du paiement</div>
+              <button
+                type="button"
+                onClick={() => paiement?.id && fetchDocs(paiement.id)}
+                className="px-3 py-2 text-xs border border-gray-200 rounded-lg dark:border-gray-800"
+              >
+                Recharger
+              </button>
+            </div>
 
-          {demande?.uuid ? (
-            <Link
-              to={`/demandes/${demande.uuid}`}
-              className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
-            >
-              Ouvrir la demande
-            </Link>
-          ) : null}
-        </div>
+            <div className="mt-3 p-3 border border-gray-200 rounded-lg dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Ajouter des pièces</div>
 
-        {demande ? (
-          <div className="grid grid-cols-1 gap-3 mt-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Info label="Motif" value={demande.motif || "-"} />
-            <Info label="Bénéficiaire" value={demande.beneficiaire || "-"} />
-            <Info label="Statut" value={demande.statut || "-"} />
-            <Info label="Montant" value={`${formatMoney(demande.montant)} FCFA`} />
-            <Info label="Direction ID" value={demande.direction_id ?? "-"} />
-            <Info label="Département ID" value={demande.departement_id ?? "-"} />
-            <Info label="Service ID" value={demande.service_id ?? "-"} />
-            <Info label="Créée le" value={formatDate(demande.created_at)} />
-            <Info label="MAJ le" value={formatDate(demande.updated_at)} />
-            <div className="sm:col-span-2 lg:col-span-3">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Description</div>
-              <div className="mt-1 text-sm text-gray-800 dark:text-white/90">
-                {demande.description || "-"}
+              {uploadError ? (
+                <div className="mt-2 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                  {uploadError}
+                </div>
+              ) : null}
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Type</div>
+                  <select
+                    value={uploadType}
+                    onChange={(e) => setUploadType(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                  >
+                    <option value="preuve_paiement">Preuve paiement</option>
+                    <option value="ordre_virement">Ordre de virement</option>
+                    <option value="recu">Reçu</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Fichiers</div>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
+                    className="w-full text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  disabled={uploading || !uploadFiles.length}
+                  onClick={doUpload}
+                  className={`px-4 py-2 text-sm rounded-lg ${
+                    uploading || !uploadFiles.length
+                      ? "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
+                      : "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                  }`}
+                >
+                  {uploading ? "Upload..." : "Uploader"}
+                </button>
               </div>
             </div>
+
+            {docsLoading ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Chargement documents...</div>
+            ) : documents.length === 0 ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {documents.map((doc) => (
+                  <a
+                    key={doc.id}
+                    href={doc.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                  >
+                    <div>
+                      <div className="font-medium">{doc.type_document || "document"}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                    </div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
-        ) : (
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-            Aucune demande associée trouvée.
-          </p>
-        )}
+        </>
+      ) : null}
+      {/* ✅ Modal création réception */}
+      <div>
+        <CreateReceptionModal
+          open={openReception}
+          paiement={paiement}                 // ✅ on passe le paiement
+          onClose={() => setOpenReception(false)}
+          onCreated={async () => {
+            // refresh paiement + redirection vers la réception si tu veux
+            await fetchPaiement();
+            // optionnel : nav("/receptions"); ou nav(`/receptions/${uuid}`)
+          }}
+        />
       </div>
     </div>
   );
@@ -224,11 +302,9 @@ export default function PaiementDetail() {
 
 function Info({ label, value }) {
   return (
-    <div className="p-3 border border-gray-100 rounded-lg dark:border-gray-800">
+    <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
       <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
-      <div className="mt-1 text-sm text-gray-800 dark:text-white/90 break-words">
-        {value ?? "-"}
-      </div>
+      <div className="mt-1 text-sm text-gray-800 dark:text-white/90 break-words">{value}</div>
     </div>
   );
 }

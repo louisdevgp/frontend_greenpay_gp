@@ -11,6 +11,8 @@ type PropsType = {
   mode?: "single" | "multiple" | "range" | "time";
   onChange?: Hook | Hook[];
   defaultDate?: DateOption;
+  dateFormat?: string;
+  options?: flatpickr.Options.Options;
   label?: string;
   placeholder?: string;
 };
@@ -21,6 +23,8 @@ export default function DatePicker({
   onChange,
   label,
   defaultDate,
+  dateFormat,
+  options,
   placeholder,
 }: PropsType) {
   useEffect(() => {
@@ -28,9 +32,10 @@ export default function DatePicker({
       mode: mode || "single",
       static: true,
       monthSelectorType: "static",
-      dateFormat: "Y-m-d",
+      dateFormat: dateFormat || "Y-m-d",
       defaultDate,
       onChange,
+      ...(options || {}),
     });
 
     return () => {
@@ -38,7 +43,7 @@ export default function DatePicker({
         flatPickr.destroy();
       }
     };
-  }, [mode, onChange, id, defaultDate]);
+  }, [mode, onChange, id, defaultDate, dateFormat, options]);
 
   return (
     <div>

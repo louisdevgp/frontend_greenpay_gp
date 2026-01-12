@@ -1,7 +1,7 @@
 import { api } from "./api";
 
 /**
- * Upload 1 document (backend attend req.file => "file")
+ * Upload 1 document (backend attend multer.array("files"))
  * body:
  * - type_document (required)
  * - demande_id (optional)
@@ -11,7 +11,7 @@ import { api } from "./api";
  */
 export async function uploadOneDocument({ file, type_document, demande_id, reception_id, paiement_id, bon_commande_id }) {
   const form = new FormData();
-  form.append("file", file); // ✅ IMPORTANT: "file" (pas files)
+  form.append("files", file);
   form.append("type_document", type_document);
 
   if (demande_id != null) form.append("demande_id", String(demande_id));

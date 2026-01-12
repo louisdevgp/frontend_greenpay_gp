@@ -45,7 +45,7 @@ export async function listDocuments(params = {}) {
 // POST /documents/upload (multipart)
 export async function uploadDocument({ file, demande_id, paiement_id, reception_id, bon_commande_id, type_document }) {
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append("files", file);
   if (demande_id != null) formData.append("demande_id", String(demande_id));
   if (paiement_id != null) formData.append("paiement_id", String(paiement_id));
   if (reception_id != null) formData.append("reception_id", String(reception_id));
@@ -60,14 +60,8 @@ export async function uploadDocument({ file, demande_id, paiement_id, reception_
 export async function uploadManyDocuments({ files = [], demande_id, type_document }) {
   const results = [];
   for (const f of files) {
-    // eslint-disable-next-line no-await-in-loop
     const r = await uploadDocument({ file: f, demande_id, type_document });
     results.push(r);
   }
   return results;
-}
-
-export async function updateDemande(id, payload) {
-  const res = await api.put(`/demandes/${id}`, payload);
-  return res.data;
 }

@@ -28,10 +28,21 @@ export default function CreateDemande() {
     montant: "",
     devise: "XOF",
     beneficiaire: "",
+    fournisseur_id: "",
     remarque: "",
     paiement_immediat: false,
     require_docs: false, // ✅
   });
+
+  const [items, setItems] = useState([
+    {
+      designation: "",
+      quantite: "1",
+      prix_unitaire: "",
+      unite: "",
+      specifications: "",
+    },
+  ]);
 
   const [docs, setDocs] = useState({
     type_document: "proforma",
@@ -45,12 +56,48 @@ export default function CreateDemande() {
     return Number.isNaN(n) ? 0 : n;
   }, [form.montant]);
 
+  const itemsTotal = useMemo(() => {
+    const sum = (items || []).reduce((acc, it) => {
+      const q = Number(it?.quantite);
+      const pu = Number(it?.prix_unitaire);
+      const line = (Number.isFinite(q) ? q : 0) * (Number.isFinite(pu) ? pu : 0);
+      return acc + (Number.isFinite(line) ? line : 0);
+    }, 0);
+    return Number.isFinite(sum) ? sum : 0;
+  }, [items]);
+
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const hasFournisseur = useMemo(() => {
+    return String(form.fournisseur_id || "").trim().length > 0;
+  }, [form.fournisseur_id]);
 
   const validate = () => {
     if (!form.motif.trim()) return "Motif obligatoire";
-    if (!form.beneficiaire.trim()) return "Bénéficiaire obligatoire";
+    if (!hasFournisseur && !form.beneficiaire.trim()) return "Bénéficiaire obligatoire";
     if (!form.montant || Number.isNaN(Number(form.montant)) || Number(form.montant) <= 0) return "Montant invalide";
+    if (form.fournisseur_id && Number.isNaN(Number(form.fournisseur_id))) return "Fournisseur ID invalide";
+
+    const effectiveItems = (items || [])
+      .map((it) => ({
+        designation: String(it?.designation || "").trim(),
+        quantite: String(it?.quantite ?? "").trim(),
+        prix_unitaire: String(it?.prix_unitaire ?? "").trim(),
+        unite: String(it?.unite || "").trim(),
+        specifications: String(it?.specifications || "").trim(),
+      }))
+      .filter((it) => it.designation || it.prix_unitaire || it.unite || it.specifications);
+
+    for (const it of effectiveItems) {
+      if (!it.designation) return "Chaque ligne doit avoir une désignation";
+      const q = Number(it.quantite || 1);
+      if (!Number.isFinite(q) || q <= 0) return "Quantité invalide sur une ligne";
+      if (it.prix_unitaire) {
+        const pu = Number(it.prix_unitaire);
+        if (!Number.isFinite(pu) || pu < 0) return "Prix unitaire invalide sur une ligne";
+      }
+    }
+
     if (form.require_docs && (!docs.files || docs.files.length === 0)) return "Veuillez joindre au moins un document.";
     return "";
   };
@@ -66,14 +113,36 @@ export default function CreateDemande() {
       setSubmitting(true);
 
       // 1) create demande
+      const cleanedItems = (items || [])
+        .map((it) => ({
+          designation: String(it?.designation || "").trim(),
+          quantite: it?.quantite === "" || it?.quantite == null ? 1 : Number(it.quantite),
+          prix_unitaire: it?.prix_unitaire === "" || it?.prix_unitaire == null ? null : Number(it.prix_unitaire),
+          unite: String(it?.unite || "").trim() || null,
+          specifications: String(it?.specifications || "").trim() || null,
+        }))
+        .filter((it) => it.designation || it.prix_unitaire != null || it.unite || it.specifications)
+        .map((it) => ({
+          ...it,
+          designation: it.designation,
+          quantite: Number.isFinite(Number(it.quantite)) ? Number(it.quantite) : 1,
+          prix_unitaire: it.prix_unitaire == null || Number.isFinite(Number(it.prix_unitaire)) ? it.prix_unitaire : null,
+          total_ligne:
+            it.prix_unitaire != null && Number.isFinite(Number(it.quantite))
+              ? Number(it.quantite) * Number(it.prix_unitaire)
+              : null,
+        }));
+
       const payload = {
         motif: form.motif.trim(),
         description: form.description?.trim() || null,
         montant: String(Number(form.montant)),
         devise: form.devise || null,
-        beneficiaire: form.beneficiaire.trim(),
+        ...(hasFournisseur ? {} : { beneficiaire: form.beneficiaire.trim() }),
+        fournisseur_id: form.fournisseur_id ? Number(form.fournisseur_id) : null,
         remarque: form.remarque?.trim() || null,
         paiement_immediat: !!form.paiement_immediat,
+        items: cleanedItems.length ? cleanedItems : undefined,
       };
 
       const res = await createDemande(payload);
@@ -165,11 +234,13 @@ export default function CreateDemande() {
             />
           </Field>
 
-          <Field label="Bénéficiaire *">
+          <Field label={hasFournisseur ? "Bénéficiaire (auto)" : "Bénéficiaire *"}>
             <input
               value={form.beneficiaire}
               onChange={(e) => setField("beneficiaire", e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              disabled={hasFournisseur}
+              placeholder={hasFournisseur ? "Déduit du fournisseur" : undefined}
             />
           </Field>
 
@@ -196,6 +267,114 @@ export default function CreateDemande() {
               <option value="USD">USD</option>
             </select>
           </Field>
+
+          <Field label="Fournisseur (ID)">
+            <input
+              value={form.fournisseur_id}
+              onChange={(e) => setField("fournisseur_id", e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Optionnel (ex: 12)"
+            />
+          </Field>
+        </div>
+
+        <div className="p-4 border border-gray-200 rounded-xl dark:border-gray-800">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Lignes (items)</div>
+            <button
+              type="button"
+              onClick={() =>
+                setItems((p) => [
+                  ...(p || []),
+                  { designation: "", quantite: "1", prix_unitaire: "", unite: "", specifications: "" },
+                ])
+              }
+              className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+            >
+              Ajouter
+            </button>
+          </div>
+
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left bg-gray-50 dark:bg-gray-950">
+                <tr>
+                  <th className="px-3 py-2">Désignation</th>
+                  <th className="px-3 py-2">Qté</th>
+                  <th className="px-3 py-2">PU</th>
+                  <th className="px-3 py-2">Unité</th>
+                  <th className="px-3 py-2">Spécifications</th>
+                  <th className="px-3 py-2 text-right">Suppr.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(items || []).map((it, idx) => (
+                  <tr key={idx} className="border-t border-gray-100 dark:border-gray-800">
+                    <td className="px-3 py-2">
+                      <input
+                        value={it.designation}
+                        onChange={(e) =>
+                          setItems((p) => p.map((x, i) => (i === idx ? { ...x, designation: e.target.value } : x)))
+                        }
+                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                        placeholder="Article / prestation"
+                      />
+                    </td>
+                    <td className="px-3 py-2 w-[110px]">
+                      <input
+                        value={it.quantite}
+                        onChange={(e) => setItems((p) => p.map((x, i) => (i === idx ? { ...x, quantite: e.target.value } : x)))}
+                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                        placeholder="1"
+                      />
+                    </td>
+                    <td className="px-3 py-2 w-[150px]">
+                      <input
+                        value={it.prix_unitaire}
+                        onChange={(e) =>
+                          setItems((p) => p.map((x, i) => (i === idx ? { ...x, prix_unitaire: e.target.value } : x)))
+                        }
+                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                        placeholder="Ex: 50000"
+                      />
+                    </td>
+                    <td className="px-3 py-2 w-[140px]">
+                      <input
+                        value={it.unite}
+                        onChange={(e) => setItems((p) => p.map((x, i) => (i === idx ? { ...x, unite: e.target.value } : x)))}
+                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                        placeholder="pcs, lot..."
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        value={it.specifications}
+                        onChange={(e) =>
+                          setItems((p) => p.map((x, i) => (i === idx ? { ...x, specifications: e.target.value } : x)))
+                        }
+                        className="w-full px-2 py-1 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                        placeholder="Optionnel"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}
+                        disabled={(items || []).length <= 1}
+                        className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-60 dark:border-gray-800"
+                      >
+                        Retirer
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+            Total items (indicatif): <span className="font-medium">{formatMoney(itemsTotal)} FCFA</span>
+          </div>
         </div>
 
         <Field label="Description">
@@ -235,7 +414,7 @@ export default function CreateDemande() {
                 checked={form.require_docs}
                 onChange={(e) => setField("require_docs", e.target.checked)}
               />
-              require_docs
+              Joindre maintenant
             </label>
           </Field>
         </div>

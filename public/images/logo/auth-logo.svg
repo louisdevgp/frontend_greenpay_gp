@@ -1,4 +1,10 @@
 <svg width="231" height="48" viewBox="0 0 231 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>GreenPay</title>
+  <rect x="0" y="0" width="231" height="48" rx="12" fill="#FFFFFF"/>
+  <text x="18" y="31" font-size="22" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial" fill="#111827" font-weight="700">GreenPay</text>
+  <circle cx="198" cy="24" r="10" fill="#16A34A"/>
+  <path d="M194.5 24.1L197.2 26.8L202 21.8" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg><svg width="231" height="48" viewBox="0 0 231 48" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M0.425781 12.6316C0.425781 5.65535 6.08113 0 13.0574 0H35.7942C42.7704 0 48.4258 5.65535 48.4258 12.6316V35.3684C48.4258 42.3446 42.7704 48 35.7942 48H13.0574C6.08113 48 0.425781 42.3446 0.425781 35.3684V12.6316Z" fill="#465FFF"/>
 <g filter="url(#filter0_d_3903_56743)">
 <path d="M13.0615 12.6323C13.0615 11.237 14.1926 10.106 15.5878 10.106C16.9831 10.106 18.1142 11.237 18.1142 12.6323V35.3691C18.1142 36.7644 16.9831 37.8954 15.5878 37.8954C14.1926 37.8954 13.0615 36.7644 13.0615 35.3691V12.6323Z" fill="white"/>

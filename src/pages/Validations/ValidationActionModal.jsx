@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { approveValidation, rejectValidation } from "../../services/validations.service";
+import { Modal } from "../../components/ui/modal";
 
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
   // mode: "approve" | "reject"
@@ -25,18 +26,22 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       const id = item?.id;
       if (!id) throw new Error("Validation ID manquant");
 
-      const payload = { commentaire: commentaire?.trim() || null };
+      const commentaireTrimmed = (commentaire || "").trim();
+      if (mode === "reject" && !commentaireTrimmed) {
+        throw new Error("Commentaire obligatoire");
+      }
 
       const res =
         mode === "approve"
-          ? await approveValidation(id, payload)
-          : await rejectValidation(id, payload);
+          ? await approveValidation(id)
+          : await rejectValidation(id, { commentaire: commentaireTrimmed });
 
       if (!res?.success) throw new Error(res?.message || "Action échouée");
       onDone?.();
       close();
     } catch (err) {
       setError(err?.message || "Erreur inconnue");
+    } finally {
       setSubmitting(false);
     }
   };
@@ -44,21 +49,24 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={close} />
-
-      <div className="relative w-full max-w-xl p-5 bg-white border border-gray-200 rounded-2xl shadow-xl dark:bg-gray-900 dark:border-gray-800">
+    <Modal
+      isOpen={open}
+      onClose={close}
+      showCloseButton={false}
+      className="w-full max-w-xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
+    >
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">{title}</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {mode === "approve" ? "Ajouter un commentaire si besoin." : "Commentaire recommandé pour le rejet."}
+              {mode === "approve" ? "Ajouter un commentaire si besoin." : "Commentaire obligatoire pour le rejet."}
             </p>
           </div>
 
           <button
             type="button"
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            disabled={submitting}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={close}
           >
             Fermer
@@ -79,7 +87,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
               onChange={(e) => setCommentaire(e.target.value)}
               rows={4}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-              placeholder="Optionnel (ou obligatoire si tu veux imposer côté backend)"
+              placeholder={mode === "reject" ? "Motif du rejet (obligatoire)" : "Optionnel"}
             />
           </div>
 
@@ -87,7 +95,8 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
             <button
               type="button"
               onClick={close}
-              className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+              disabled={submitting}
+              className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               Annuler
             </button>
@@ -105,7 +114,6 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

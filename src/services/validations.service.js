@@ -13,8 +13,8 @@ export async function listValidationsDone(params = {}) {
 }
 
 // Valider
-export async function approveValidation(id, payload = {}) {
-  const res = await api.post(`/validations/${id}/approve`, payload);
+export async function approveValidation(id) {
+  const res = await api.post(`/validations/${id}/approve`);
   return res.data;
 }
 
@@ -24,12 +24,12 @@ export async function rejectValidation(id, payload = {}) {
   return res.data;
 }
 
-export async function getValidationById(id) {
-  const res = await api.get(`/validations/${id}`);
+export async function getValidationByUuid(uuid) {
+  const res = await api.get(`/validations/uuid/${uuid}`); // adapte si ton endpoint diffère
   return res.data;
 }
 
-export async function getValidationByUuid(uuid) {
-  const res = await api.get(`/validations/uuid/${uuid}`); // adapte si ton endpoint diffère
+export async function listValidationsDoneByDemande(demandeUuid) {
+  const res = await api.get(`/validations/done-by-demande/${demandeUuid}`);
   return res.data;
 }
