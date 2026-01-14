@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { getReception, visaDaf, visaDirecteur } from "../../services/receptions.service";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
+import { Modal } from "../../components/ui/modal";
+import SignaturePad from "../../components/SignaturePad/SignaturePad";
 
 function formatMoney(v) {
   const n = Number(v ?? 0);
@@ -27,11 +29,14 @@ export default function ReceptionDetail() {
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
 
-  const canDownloadPdf = roles.includes("COMPTABLE") || roles.includes("DAF") || roles.includes("DIRECTEUR") || roles.includes("ADMIN");
+  const canDownloadPdfRole = roles.includes("COMPTABLE") || roles.includes("DAF") || roles.includes("DIRECTEUR") || roles.includes("ADMIN");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reception, setReception] = useState(null);
+
+  const hasAllVisas = !!reception?.visa_directeur_id && !!reception?.visa_daf_id;
+  const canDownloadPdf = canDownloadPdfRole && hasAllVisas;
 
   const [docsLoading, setDocsLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
@@ -39,10 +44,18 @@ export default function ReceptionDetail() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [uploadType, setUploadType] = useState("bl");
+  const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
 
   const [visaLoading, setVisaLoading] = useState(false);
   const [visaError, setVisaError] = useState("");
+
+  const [visaModalOpen, setVisaModalOpen] = useState(false);
+  const [visaKind, setVisaKind] = useState(null); // "directeur" | "daf" | null
+  const [visaSignature, setVisaSignature] = useState({ empty: true, dataUrl: "" });
+  const visaSignatureRef = useRef(null);
+  const [visaCommentaire, setVisaCommentaire] = useState("");
+  const [visaModalError, setVisaModalError] = useState("");
 
   const fetchReception = async () => {
     setLoading(true);
@@ -76,12 +89,17 @@ export default function ReceptionDetail() {
   const canVisaDirecteur = (roles.includes("DIRECTEUR") || roles.includes("ADMIN")) && !reception?.visa_directeur_id;
   const canVisaDaf = (roles.includes("DAF") || roles.includes("ADMIN")) && !!reception?.visa_directeur_id && !reception?.visa_daf_id;
 
-  const doVisa = async (kind) => {
+  const doVisa = async (kind, signatureDataUrl, commentaire) => {
     if (!reception?.id) return;
     setVisaError("");
     try {
       setVisaLoading(true);
-      const res = kind === "directeur" ? await visaDirecteur(reception.id, {}) : await visaDaf(reception.id, {});
+      const commentaireTrimmed = (commentaire || "").trim();
+      const payload = {
+        ...(signatureDataUrl ? { signature_data_url: signatureDataUrl } : {}),
+        ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
+      };
+      const res = kind === "directeur" ? await visaDirecteur(reception.id, payload) : await visaDaf(reception.id, payload);
       if (!res?.success) throw new Error(res?.message || "Visa échoué");
       await fetchReception();
     } catch (e) {
@@ -91,19 +109,62 @@ export default function ReceptionDetail() {
     }
   };
 
+  const openVisaModal = (kind) => {
+    setVisaModalError("");
+    setVisaKind(kind);
+    setVisaSignature({ empty: true, dataUrl: "" });
+    setVisaCommentaire("");
+    setVisaModalOpen(true);
+  };
+
+  const closeVisaModal = () => {
+    if (visaLoading) return;
+    setVisaModalOpen(false);
+    setVisaKind(null);
+    setVisaSignature({ empty: true, dataUrl: "" });
+    setVisaCommentaire("");
+    setVisaModalError("");
+  };
+
+  const confirmVisa = async () => {
+    setVisaModalError("");
+    try {
+      if (!visaKind) throw new Error("Type de visa invalide");
+      // Fallback mobile/web: relire directement le canvas au submit
+      const liveEmpty = visaSignatureRef.current?.isEmpty?.() ?? true;
+      const liveDataUrl = visaSignatureRef.current?.getDataUrl?.() ?? "";
+      if (liveEmpty || !liveDataUrl) throw new Error("Signature obligatoire");
+      setVisaSignature({ empty: false, dataUrl: liveDataUrl });
+      await doVisa(visaKind, liveDataUrl, visaCommentaire);
+      closeVisaModal();
+    } catch (e) {
+      setVisaModalError(e?.message || "Erreur visa");
+    }
+  };
+
   const doUpload = async () => {
     if (!reception?.id) return;
     setUploadError("");
     try {
       if (!uploadFiles?.length) throw new Error("Veuillez choisir au moins un fichier");
+
+      const typeDoc =
+        uploadType === "autre"
+          ? `autre:${String(uploadTypeAutre || "").trim()}`
+          : uploadType;
+      if (uploadType === "autre" && (!uploadTypeAutre || !String(uploadTypeAutre).trim())) {
+        throw new Error("Veuillez préciser le type (Autre)");
+      }
+
       setUploading(true);
       const res = await uploadManyDocuments({
         files: uploadFiles,
         reception_id: reception.id,
-        type_document: uploadType,
+        type_document: typeDoc,
       });
       if (!res?.success) throw new Error(res?.message || "Upload échoué");
       setUploadFiles([]);
+      setUploadTypeAutre("");
       await fetchDocs(reception.id);
     } catch (e) {
       setUploadError(e?.message || "Erreur upload");
@@ -115,6 +176,62 @@ export default function ReceptionDetail() {
   return (
     <div className="space-y-4">
       <FullscreenLoader show={loading} label="Chargement de la réception..." />
+
+      <Modal isOpen={visaModalOpen} onClose={closeVisaModal} className="max-w-2xl p-6" showCloseButton={!visaLoading}>
+        <div className="text-lg font-semibold text-gray-800 dark:text-white/90">
+          {visaKind === "directeur" ? "Visa Directeur" : visaKind === "daf" ? "Visa DAF" : "Visa"}
+        </div>
+        <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">Veuillez signer avant de valider.</div>
+
+        {visaModalError ? (
+          <div className="mt-3 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+            {visaModalError}
+          </div>
+        ) : null}
+
+        <div className="mt-4">
+          <SignaturePad
+            ref={visaSignatureRef}
+            label="Signature (obligatoire)"
+            showStatus
+            showPreview
+            onChange={(v) => {
+              setVisaSignature(v);
+              if (!v?.empty) setVisaModalError("");
+            }}
+          />
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire (optionnel)</div>
+          <textarea
+            value={visaCommentaire}
+            onChange={(e) => setVisaCommentaire(e.target.value)}
+            rows={3}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            placeholder="Optionnel"
+          />
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={visaLoading}
+            onClick={closeVisaModal}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            disabled={visaLoading}
+            onClick={confirmVisa}
+            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+          >
+            {visaLoading ? "Validation..." : "Valider"}
+          </button>
+        </div>
+      </Modal>
 
       {error ? (
         <div className="p-4 space-y-3">
@@ -177,7 +294,6 @@ export default function ReceptionDetail() {
             <Info label="Date réception" value={formatDateTime(reception.date_reception)} />
             <Info label="Créé" value={formatDateTime(reception.created_at)} />
             <Info label="Conforme" value={reception.conforme ? "Oui" : "Non"} />
-            <Info label="Fournisseur" value={reception.fournisseur || "-"} />
             <Info label="Réf. facture" value={reception.reference_facture || "-"} />
             <Info label="Montant" value={reception.montant != null ? `${formatMoney(reception.montant)} FCFA` : "-"} />
             <Info label="Visa Directeur" value={reception.visa_directeur_id ? "Oui" : "Non"} />
@@ -206,7 +322,7 @@ export default function ReceptionDetail() {
               <button
                 type="button"
                 disabled={!canVisaDirecteur || visaLoading}
-                onClick={() => doVisa("directeur")}
+                onClick={() => openVisaModal("directeur")}
                 className={`px-4 py-2 text-sm rounded-lg ${
                   canVisaDirecteur
                     ? "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
@@ -219,7 +335,7 @@ export default function ReceptionDetail() {
               <button
                 type="button"
                 disabled={!canVisaDaf || visaLoading}
-                onClick={() => doVisa("daf")}
+                onClick={() => openVisaModal("daf")}
                 className={`px-4 py-2 text-sm rounded-lg ${
                   canVisaDaf
                     ? "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
@@ -274,7 +390,10 @@ export default function ReceptionDetail() {
                   <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Type</div>
                   <select
                     value={uploadType}
-                    onChange={(e) => setUploadType(e.target.value)}
+                    onChange={(e) => {
+                      setUploadType(e.target.value);
+                      if (e.target.value !== "autre") setUploadTypeAutre("");
+                    }}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
                   >
                     <option value="bl">BL</option>
@@ -283,7 +402,19 @@ export default function ReceptionDetail() {
                   </select>
                 </div>
 
-                <div className="sm:col-span-2">
+                {uploadType === "autre" ? (
+                  <div>
+                    <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Préciser</div>
+                    <input
+                      value={uploadTypeAutre}
+                      onChange={(e) => setUploadTypeAutre(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="Ex: bon de transport"
+                    />
+                  </div>
+                ) : null}
+
+                <div className={uploadType === "autre" ? "sm:col-span-1" : "sm:col-span-2"}>
                   <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Fichiers</div>
                   <input
                     type="file"
@@ -317,11 +448,12 @@ export default function ReceptionDetail() {
             ) : (
               <div className="mt-3 space-y-2">
                 {documents.map((doc) => (
-                  <a
+                  <button
                     key={doc.id}
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    type="button"
+                    onClick={() =>
+                      downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                    }
                     className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                   >
                     <div>
@@ -329,7 +461,7 @@ export default function ReceptionDetail() {
                       <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
                     </div>
                     <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
-                  </a>
+                  </button>
                 ))}
               </div>
             )}

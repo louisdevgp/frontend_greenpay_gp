@@ -1,10 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { approveValidation, rejectValidation } from "../../services/validations.service";
 import { Modal } from "../../components/ui/modal";
+import SignaturePad from "../../components/SignaturePad/SignaturePad";
 
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
   // mode: "approve" | "reject"
   const [commentaire, setCommentaire] = useState("");
+  const [signature, setSignature] = useState({ empty: true, dataUrl: "" });
+  const signatureRef = useRef(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -13,6 +16,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const close = () => {
     if (submitting) return;
     setCommentaire("");
+    setSignature({ empty: true, dataUrl: "" });
     setError("");
     onClose?.();
   };
@@ -31,9 +35,20 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         throw new Error("Commentaire obligatoire");
       }
 
+      if (mode === "approve" && signature?.empty) {
+        // Fallback mobile/web: relire directement le canvas au submit
+        const liveEmpty = signatureRef.current?.isEmpty?.() ?? true;
+        const liveDataUrl = signatureRef.current?.getDataUrl?.() ?? "";
+        if (liveEmpty || !liveDataUrl) throw new Error("Signature obligatoire");
+        setSignature({ empty: false, dataUrl: liveDataUrl });
+      }
+
       const res =
         mode === "approve"
-          ? await approveValidation(id)
+          ? await approveValidation(id, {
+              ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
+              signature_data_url: (signatureRef.current?.getDataUrl?.() || signature?.dataUrl || ""),
+            })
           : await rejectValidation(id, { commentaire: commentaireTrimmed });
 
       if (!res?.success) throw new Error(res?.message || "Action échouée");
@@ -90,6 +105,19 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
               placeholder={mode === "reject" ? "Motif du rejet (obligatoire)" : "Optionnel"}
             />
           </div>
+
+          {mode === "approve" ? (
+            <SignaturePad
+              ref={signatureRef}
+              label="Signature (obligatoire)"
+              showStatus
+              showPreview
+              onChange={(v) => {
+                setSignature(v);
+                if (!v?.empty) setError("");
+              }}
+            />
+          ) : null}
 
           <div className="flex justify-end gap-2 pt-1">
             <button

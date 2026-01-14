@@ -5,6 +5,11 @@ export async function listUsers(params = {}) {
   return res.data;
 }
 
+export async function createUser(payload) {
+  const res = await api.post("/users", payload);
+  return res.data;
+}
+
 export async function getUser(idOrUuid) {
   const res = await api.get(`/users/${idOrUuid}`);
   return res.data;
@@ -17,5 +22,10 @@ export async function updateUser(idOrUuid, payload) {
 
 export async function softDeleteUser(idOrUuid) {
   const res = await api.delete(`/users/${idOrUuid}`);
+  return res.data;
+}
+
+export async function adminResetUserPassword(idOrUuid) {
+  const res = await api.post(`/users/${idOrUuid}/reset-password`);
   return res.data;
 }

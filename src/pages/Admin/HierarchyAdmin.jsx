@@ -19,7 +19,7 @@ export default function HierarchyAdmin() {
     try {
       const res = await listAgents({ limit: 200 });
       if (!res?.success) throw new Error(res?.message || "Erreur chargement agents");
-      setAgents(res.items || []);
+      setAgents(res?.items || res?.data?.items || []);
     } catch (e) {
       setError(e?.message || "Erreur");
     } finally {

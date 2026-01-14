@@ -13,8 +13,8 @@ export async function listValidationsDone(params = {}) {
 }
 
 // Valider
-export async function approveValidation(id) {
-  const res = await api.post(`/validations/${id}/approve`);
+export async function approveValidation(id, payload = {}) {
+  const res = await api.post(`/validations/${id}/approve`, payload);
   return res.data;
 }
 

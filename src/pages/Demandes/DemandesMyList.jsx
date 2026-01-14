@@ -262,15 +262,12 @@ export default function DemandesMyList() {
 
                         <button
                           type="button"
-                          disabled={!canEditDemande(d)}
                           onClick={() => {
                             setSelectedDemande(d);
                             setOpenEdit(true);
                           }}
-                          className={`inline-flex p-2 border border-gray-200 rounded-lg dark:border-gray-800 ${
-                            canEditDemande(d) ? "hover:bg-gray-50 dark:hover:bg-gray-950" : "opacity-50 cursor-not-allowed"
-                          }`}
-                          title={canEditDemande(d) ? "Modifier" : "Modification désactivée"}
+                          className="inline-flex p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                          title="Modifier"
                         >
                           <PencilIcon />
                         </button>

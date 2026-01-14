@@ -31,10 +31,10 @@
     "react-helmet-async": "^2.0.5",
     "react-router": "^7.1.5",
     "react-router-dom": "^7.11.0",
+    "react-signature-canvas": "^1.1.0-alpha.2",
+    "react-toastify": "^11.0.5",
     "swiper": "^11.2.3",
     "tailwind-merge": "^3.0.1"
-    ,
-    "react-toastify": "^11.0.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",

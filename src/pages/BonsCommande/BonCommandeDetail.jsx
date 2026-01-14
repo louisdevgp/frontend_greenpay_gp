@@ -135,7 +135,6 @@ export default function BonCommandeDetail() {
             <Info label="Numéro" value={bc.numero || "-"} mono />
             <Info label="Statut" value={labelBonCommandeStatut(bc.statut)} />
             <Info label="Date commande" value={formatDateTime(bc.date_commande)} />
-            <Info label="Fournisseur" value={bc?.fournisseurs?.nom || bc?.fournisseurs?.raison_sociale || "-"} />
             <Info label="Total" value={`${formatMoney(total)} FCFA`} />
             <Info label="Créé" value={formatDateTime(bc.created_at)} />
           </div>
@@ -201,11 +200,12 @@ export default function BonCommandeDetail() {
             {Array.isArray(bc?.documents) && bc.documents.length ? (
               <div className="mt-3 space-y-2">
                 {bc.documents.map((doc) => (
-                  <a
+                  <button
                     key={doc.id}
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    type="button"
+                    onClick={() =>
+                      downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                    }
                     className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                   >
                     <div>
@@ -213,7 +213,7 @@ export default function BonCommandeDetail() {
                       <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
                     </div>
                     <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
-                  </a>
+                  </button>
                 ))}
               </div>
             ) : (

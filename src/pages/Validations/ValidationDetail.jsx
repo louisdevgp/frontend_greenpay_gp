@@ -4,6 +4,7 @@ import { getValidationByUuid, listValidationsPending } from "../../services/vali
 import { listDocuments } from "../../services/documents.service";
 import ValidationActionModal from "./ValidationActionModal";
 import { labelDemandeStatut } from "../../utils/statusLabels";
+import { downloadFile } from "../../utils/downloadFile";
 
 function formatMoney(v) {
   const n = Number(v ?? 0);
@@ -119,6 +120,7 @@ export default function ValidationDetail() {
   }
 
   const demandeUuid = demande?.uuid || "-";
+  const commentaireStep = String(validation?.commentaire ?? "").trim();
 
   return (
     <div className="space-y-4">
@@ -141,6 +143,12 @@ export default function ValidationDetail() {
             Rafraîchir
           </button>
         </div>
+      </div>
+
+      {/* Commentaire de l'étape */}
+      <div className="p-5 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+        <div className="text-base font-semibold text-gray-800 dark:text-white/90">Commentaire</div>
+        <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{commentaireStep || "-"}</div>
       </div>
 
       {/* Demande */}
@@ -178,11 +186,12 @@ export default function ValidationDetail() {
         ) : (
           <div className="mt-3 space-y-2">
             {documents.map((doc) => (
-              <a
+              <button
                 key={doc.id}
-                href={doc.url}
-                target="_blank"
-                rel="noreferrer"
+                type="button"
+                onClick={() =>
+                  downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                }
                 className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
               >
                 <div>
@@ -190,7 +199,7 @@ export default function ValidationDetail() {
                   <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
                 </div>
                 <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
-              </a>
+              </button>
             ))}
           </div>
         )}

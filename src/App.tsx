@@ -7,6 +7,8 @@ import ForgotPassword from "./pages/AuthPages/ForgotPassword";
 import ResetPassword from "./pages/AuthPages/ResetPassword";
 import NotFound from "./pages/OtherPage/NotFound";
 
+import ScanPage from "./pages/Scan/ScanPage";
+
 import UserProfiles from "./pages/UserProfiles";
 import Calendar from "./pages/Calendar";
 import Blank from "./pages/Blank";
@@ -50,6 +52,9 @@ import UsersAdmin from "./pages/Admin/UsersAdmin";
 import AgentsAdmin from "./pages/Admin/AgentsAdmin";
 import HierarchyAdmin from "./pages/Admin/HierarchyAdmin";
 import DelegationsAdmin from "./pages/Admin/DelegationsAdmin";
+import DirectionsAdmin from "./pages/Admin/DirectionsAdmin";
+import DepartementsAdmin from "./pages/Admin/DepartementsAdmin";
+import ServicesAdmin from "./pages/Admin/ServicesAdmin";
 
 
 // (optionnel) page 403
@@ -66,6 +71,9 @@ export default function App() {
       <ScrollToTop />
 
       <Routes>
+        {/* ---------------- PUBLIC SCAN (QR) ---------------- */}
+        <Route path="/scan" element={<ScanPage />} />
+
         {/* ---------------- AUTH (guest only) ---------------- */}
         <Route element={<GuestGuard />}>
           <Route path="/signin" element={<SignIn />} />
@@ -127,6 +135,9 @@ export default function App() {
               <Route element={<RoleGuard allow={["ADMIN"]} />}>
                 <Route path="/admin/users" element={<UsersAdmin />} />
                 <Route path="/admin/hierarchy" element={<HierarchyAdmin />} />
+                <Route path="/admin/directions" element={<DirectionsAdmin />} />
+                <Route path="/admin/departements" element={<DepartementsAdmin />} />
+                <Route path="/admin/services" element={<ServicesAdmin />} />
                 <Route path="/admin/agents" element={<AgentsAdmin />} />
                 <Route path="/admin/delegations" element={<DelegationsAdmin />} />
               </Route>

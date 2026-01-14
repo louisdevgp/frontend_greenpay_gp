@@ -6,6 +6,7 @@ import { listReceptions } from "../../services/receptions.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 // PaiementDetail.jsx
 import CreateReceptionModal from "../Receptions/CreateReceptionModal"; // ✅ ajuste le chemin selon ton arbo
+import { downloadFile } from "../../utils/downloadFile";
 
 
 function formatMoney(v) {
@@ -38,6 +39,7 @@ export default function PaiementDetail() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [uploadType, setUploadType] = useState("preuve_paiement");
+  const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
 
   const fetchPaiement = async () => {
@@ -98,14 +100,22 @@ export default function PaiementDetail() {
     setUploadError("");
     try {
       if (!uploadFiles?.length) throw new Error("Veuillez choisir au moins un fichier");
+      const typeDoc =
+        uploadType === "autre"
+          ? `autre:${String(uploadTypeAutre || "").trim()}`
+          : uploadType;
+      if (uploadType === "autre" && (!uploadTypeAutre || !String(uploadTypeAutre).trim())) {
+        throw new Error("Veuillez préciser le type (Autre)");
+      }
       setUploading(true);
       const res = await uploadManyDocuments({
         files: uploadFiles,
-        type_document: uploadType,
+        type_document: typeDoc,
         paiement_id: paiement.id,
       });
       if (!res?.success) throw new Error(res?.message || "Upload échoué");
       setUploadFiles([]);
+      setUploadTypeAutre("");
       await fetchDocs(paiement.id);
     } catch (e) {
       setUploadError(e?.message || "Erreur upload");
@@ -172,6 +182,13 @@ export default function PaiementDetail() {
             <Info label="Référence" value={paiement.reference_piece || "-"} />
           </div>
 
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Commentaire</div>
+            <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+              {String(paiement?.commentaire || "").trim() || "-"}
+            </div>
+          </div>
+
           {/* Lien demande si dispo */}
           <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
             <div className="text-sm font-medium text-gray-800 dark:text-white/90">Demande liée</div>
@@ -220,7 +237,10 @@ export default function PaiementDetail() {
                   <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Type</div>
                   <select
                     value={uploadType}
-                    onChange={(e) => setUploadType(e.target.value)}
+                    onChange={(e) => {
+                      setUploadType(e.target.value);
+                      if (e.target.value !== "autre") setUploadTypeAutre("");
+                    }}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
                   >
                     <option value="preuve_paiement">Preuve paiement</option>
@@ -230,7 +250,19 @@ export default function PaiementDetail() {
                   </select>
                 </div>
 
-                <div className="sm:col-span-2">
+                {uploadType === "autre" ? (
+                  <div>
+                    <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Préciser</div>
+                    <input
+                      value={uploadTypeAutre}
+                      onChange={(e) => setUploadTypeAutre(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="Ex: avis de débit"
+                    />
+                  </div>
+                ) : null}
+
+                <div className={uploadType === "autre" ? "sm:col-span-1" : "sm:col-span-2"}>
                   <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Fichiers</div>
                   <input
                     type="file"
@@ -264,11 +296,12 @@ export default function PaiementDetail() {
             ) : (
               <div className="mt-3 space-y-2">
                 {documents.map((doc) => (
-                  <a
+                  <button
                     key={doc.id}
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    type="button"
+                    onClick={() =>
+                      downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                    }
                     className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                   >
                     <div>
@@ -276,7 +309,7 @@ export default function PaiementDetail() {
                       <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
                     </div>
                     <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
-                  </a>
+                  </button>
                 ))}
               </div>
             )}

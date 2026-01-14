@@ -3,6 +3,7 @@ import { createPaiement } from "../../services/paiements.service";
 import { uploadManyDocuments } from "../../services/documents.service";
 import { Modal } from "../../components/ui/modal";
 import DatePicker from "../../components/form/date-picker";
+import { getDemande } from "../../services/demandes.services";
 
 
 
@@ -11,6 +12,32 @@ const TYPE_PAIEMENT = [
   { value: "total", label: "Total" },
   { value: "partiel", label: "Partiel" },
 ];
+
+function round2(v) {
+  const n = Number(v);
+  if (Number.isNaN(n) || !Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+function amountsEqual(a, b, tolerance = 0.01) {
+  const na = Number(a);
+  const nb = Number(b);
+  if (!Number.isFinite(na) || !Number.isFinite(nb)) return false;
+  return Math.abs(na - nb) <= tolerance;
+}
+
+function deriveModeFromConditions(conds) {
+  const list = Array.isArray(conds) ? conds : [];
+  const pcts = list.map((c) => Number(c?.pourcentage)).filter((n) => Number.isFinite(n));
+  if (pcts.length === 1 && amountsEqual(pcts[0], 100, 0.01)) return "100/100";
+  if (pcts.length === 2) {
+    const a = round2(pcts[0]);
+    const b = round2(pcts[1]);
+    if (amountsEqual(a, 70, 0.01) && amountsEqual(b, 30, 0.01)) return "70/30";
+    if (amountsEqual(a, 50, 0.01) && amountsEqual(b, 50, 0.01)) return "50/50";
+  }
+  return null;
+}
 
 function formatMoney(v) {
   const n = Number(v ?? 0);
@@ -21,6 +48,9 @@ function formatMoney(v) {
 export default function CreatePaiementModal({ open, onClose, demande, onCreated }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const [demandeResolved, setDemandeResolved] = useState(demande || null);
+  const [demandeResolving, setDemandeResolving] = useState(false);
 
   const [form, setForm] = useState({
     type_paiement: "total",
@@ -38,7 +68,66 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
     files: [],
   });
 
-  const demandeMontant = useMemo(() => Number(demande?.montant ?? 0), [demande?.montant]);
+  const [docsTypeAutre, setDocsTypeAutre] = useState("");
+
+  useEffect(() => {
+    setDemandeResolved(demande || null);
+  }, [demande]);
+
+  useEffect(() => {
+    let alive = true;
+    const resolve = async () => {
+      if (!open) return;
+
+      const uuid = demande?.uuid || demande?.demande_uuid;
+      const hasConditions = Array.isArray(demande?.conditions_paiement) && demande.conditions_paiement.length > 0;
+
+      // When opening from list views, demande may be a light payload without conditions.
+      if (!uuid || hasConditions) {
+        setDemandeResolved(demande || null);
+        return;
+      }
+
+      try {
+        setDemandeResolving(true);
+        const res = await getDemande(uuid);
+        if (!alive) return;
+        if (res?.success && res?.data) {
+          setDemandeResolved(res.data);
+        } else {
+          setDemandeResolved(demande || null);
+        }
+      } catch {
+        if (!alive) return;
+        setDemandeResolved(demande || null);
+      } finally {
+        if (!alive) return;
+        setDemandeResolving(false);
+      }
+    };
+
+    resolve();
+    return () => {
+      alive = false;
+    };
+  }, [open, demande?.uuid, demande?.demande_uuid, demande?.conditions_paiement]);
+
+  const demandeMontant = useMemo(() => Number(demandeResolved?.montant ?? 0), [demandeResolved?.montant]);
+
+  const conditions = useMemo(() => {
+    const list = Array.isArray(demandeResolved?.conditions_paiement) ? demandeResolved.conditions_paiement : [];
+    return list.slice().sort((a, b) => Number(a?.id ?? 0) - Number(b?.id ?? 0));
+  }, [demandeResolved?.conditions_paiement]);
+
+  const unpaid = useMemo(() => {
+    return conditions.filter((c) => !c?.paiement_id && String(c?.statut || "").toLowerCase() !== "paye");
+  }, [conditions]);
+
+  const paiementMode = useMemo(() => deriveModeFromConditions(conditions), [conditions]);
+  const nextTranche = unpaid?.[0] || null;
+  const remainingTotal = useMemo(() => {
+    return round2(unpaid.reduce((acc, c) => acc + Number(c?.montant_prevu || 0), 0));
+  }, [unpaid]);
 
   useEffect(() => {
     if (!open) return;
@@ -47,7 +136,7 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
     setForm((p) => ({
       ...p,
       type_paiement: "total",
-      montant: demandeMontant ? String(demandeMontant) : "",
+      montant: remainingTotal ? String(remainingTotal) : (demandeMontant ? String(demandeMontant) : ""),
       date_paiement: new Date().toISOString().slice(0, 10), // YYYY-MM-DD
       moyen_paiement: "virement",
       reference_piece: "",
@@ -56,16 +145,25 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
       require_docs: true,
     }));
     setDocs({ type_document: "preuve_paiement", files: [] });
-  }, [open, demandeMontant]);
+    setDocsTypeAutre("");
+  }, [open, demandeMontant, remainingTotal]);
 
   const isTotal = form.type_paiement === "total";
+  const isPartiel = form.type_paiement === "partiel";
+  const partielAllowed = paiementMode !== "100/100";
+  const expectedAmount = useMemo(() => {
+    if (isTotal) return remainingTotal || demandeMontant;
+    if (isPartiel) return nextTranche?.montant_prevu != null ? Number(nextTranche.montant_prevu) : null;
+    return null;
+  }, [isTotal, isPartiel, remainingTotal, demandeMontant, nextTranche]);
 
   useEffect(() => {
     if (!open) return;
-    if (isTotal && demandeMontant) {
-      setForm((p) => ({ ...p, montant: String(demandeMontant) }));
+    // Auto-fill montant selon les règles (montant exact attendu)
+    if (expectedAmount != null && expectedAmount !== "") {
+      setForm((p) => ({ ...p, montant: String(expectedAmount) }));
     }
-  }, [isTotal, demandeMontant, open]);
+  }, [expectedAmount, open]);
 
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -75,21 +173,35 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
   };
 
   const validate = () => {
-    if (!demande?.id && !demande?.demande_id) return "Demande introuvable";
+    if (!demandeResolved?.id && !demandeResolved?.demande_id) return "Demande introuvable";
     if (!form.type_paiement) return "Type paiement obligatoire";
     if (!form.moyen_paiement) return "Moyen paiement obligatoire";
 
     const m = Number(form.montant);
     if (!m || Number.isNaN(m) || m <= 0) return "Montant invalide";
 
-    if (isTotal && demandeMontant && m !== demandeMontant) {
-      return "Montant total doit égaler le montant de la demande";
+    // Règles conditions paiement
+    if (paiementMode === "100/100" && String(form.type_paiement) === "partiel") {
+      return "Condition 100/100 : paiement en une seule fois";
+    }
+
+    if (expectedAmount != null && !amountsEqual(m, expectedAmount)) {
+      return `Montant attendu = ${expectedAmount}`;
     }
 
     if (!form.date_paiement) return "Date paiement obligatoire";
 
     if (form.require_docs && (!docs.files?.length)) {
       return "Veuillez joindre au moins un document";
+    }
+
+    if (
+      form.require_docs &&
+      docs.files?.length &&
+      String(docs.type_document).toLowerCase() === "autre" &&
+      !docsTypeAutre.trim()
+    ) {
+      return "Veuillez préciser le type de document (Autre)";
     }
 
     return "";
@@ -109,7 +221,7 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
 
       // ✅ 1) Créer paiement (JSON)
       const payload = {
-        demande_id: demande.id ?? demande.demande_id,
+        demande_id: demandeResolved?.id ?? demandeResolved?.demande_id,
         type_paiement: form.type_paiement,
         montant: String(Number(form.montant)),
         date_paiement: new Date(form.date_paiement).toISOString(),
@@ -131,9 +243,14 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
 
       // ✅ 2) Upload documents (API séparée)
       if (form.require_docs && docs.files?.length) {
+        const typeDocumentToSend =
+          String(docs.type_document).toLowerCase() === "autre"
+            ? `autre:${docsTypeAutre.trim()}`
+            : docs.type_document;
+
         await uploadManyDocuments({
           files: docs.files,
-          type_document: docs.type_document,
+          type_document: typeDocumentToSend,
           paiement_id: paiementId,
         });
       }
@@ -169,11 +286,32 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
           <button
             type="button"
             onClick={close}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            disabled={submitting}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             Fermer
           </button>
         </div>
+
+        {paiementMode ? (
+          <div className="mt-3 text-xs text-gray-600 dark:text-gray-300">
+            Conditions: <span className="font-medium">{paiementMode}</span>
+            {unpaid?.length ? (
+              <>
+                {" — "}Restant: <span className="font-medium">{formatMoney(remainingTotal)} FCFA</span>
+                {nextTranche?.montant_prevu != null ? (
+                  <>
+                    {" — "}Prochaine tranche: <span className="font-medium">{formatMoney(nextTranche.montant_prevu)} FCFA</span>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {demandeResolving ? (
+          <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Chargement des conditions de paiement…</div>
+        ) : null}
 
         {error ? (
           <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
@@ -189,7 +327,7 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
                 onChange={(e) => setField("type_paiement", e.target.value)}
                 className={fieldClass}
               >
-                {TYPE_PAIEMENT.map((t) => (
+                {TYPE_PAIEMENT.filter((t) => (t.value === "partiel" ? partielAllowed : true)).map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
                   </option>
@@ -202,7 +340,7 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
                 value={form.montant}
                 onChange={(e) => setField("montant", e.target.value)}
                 className={fieldClass}
-                disabled={isTotal}
+                disabled={isTotal || isPartiel}
                 placeholder="Ex: 200000"
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Aperçu: {formatMoney(form.montant)} FCFA</p>
@@ -282,7 +420,11 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
                 <Field label="Type document">
                   <select
                     value={docs.type_document}
-                    onChange={(e) => setDocs((p) => ({ ...p, type_document: e.target.value }))}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setDocs((p) => ({ ...p, type_document: v }));
+                      if (String(v).toLowerCase() !== "autre") setDocsTypeAutre("");
+                    }}
                     className={fieldClass}
                   >
                     <option value="preuve_paiement">preuve_paiement</option>
@@ -290,6 +432,17 @@ export default function CreatePaiementModal({ open, onClose, demande, onCreated 
                     <option value="autre">autre</option>
                   </select>
                 </Field>
+
+                {String(docs.type_document).toLowerCase() === "autre" ? (
+                  <Field label="Préciser (Autre)">
+                    <input
+                      value={docsTypeAutre}
+                      onChange={(e) => setDocsTypeAutre(e.target.value)}
+                      className={fieldClass}
+                      placeholder="Ex: bordereau, avis de débit..."
+                    />
+                  </Field>
+                ) : null}
 
                 <Field label="Fichiers">
                   <input

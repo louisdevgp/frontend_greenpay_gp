@@ -19,7 +19,6 @@ export default function CreateBonCommandeModal({ open, demande, onClose, onCreat
   }, [demande?.demande_items]);
 
   const [form, setForm] = useState({
-    fournisseur_id: "",
     date_commande: "",
     statut: "brouillon",
     items: [],
@@ -35,13 +34,12 @@ export default function CreateBonCommandeModal({ open, demande, onClose, onCreat
     setSubmitting(false);
     setError("");
     setForm({
-      fournisseur_id: demande?.fournisseur_id ? String(demande.fournisseur_id) : "",
       date_commande: new Date().toISOString().slice(0, 10),
       statut: "brouillon",
       items: initialItems.length ? initialItems : [{ designation: "", quantite: 1, prix_unitaire: "", unite: "" }],
     });
     setDocs({ type_document: "bon_commande", files: [] });
-  }, [open, demande?.fournisseur_id, initialItems]);
+  }, [open, initialItems]);
 
   const close = () => {
     if (submitting) return;
@@ -94,7 +92,6 @@ export default function CreateBonCommandeModal({ open, demande, onClose, onCreat
 
       const payload = {
         demande_id: demande.id,
-        fournisseur_id: form.fournisseur_id ? Number(form.fournisseur_id) : null,
         date_commande: form.date_commande ? new Date(form.date_commande).toISOString() : null,
         statut: form.statut,
         items: form.items.map((it) => ({
@@ -159,10 +156,7 @@ export default function CreateBonCommandeModal({ open, demande, onClose, onCreat
         ) : null}
 
         <form noValidate onSubmit={onSubmit} className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="Fournisseur ID (optionnel)">
-              <input value={form.fournisseur_id} onChange={(e) => setForm((p) => ({ ...p, fournisseur_id: e.target.value }))} className={fieldClass} />
-            </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Date commande">
               <DatePicker
                 id="bc-date-commande"

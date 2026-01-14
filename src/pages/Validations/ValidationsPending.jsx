@@ -199,22 +199,25 @@ export default function ValidationsPending() {
                 <th className="px-4 py-3">Montant</th>
                 <th className="px-4 py-3">Statut</th>
                 <th className="px-4 py-3">Créée</th>
+                <th className="px-4 py-3">Commentaire</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={6}>Chargement...</td></tr>
+                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Chargement...</td></tr>
               ) : error ? (
-                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={6}>{error}</td></tr>
+                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={7}>{error}</td></tr>
               ) : paginated.length === 0 ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={6}>Aucune validation en attente.</td></tr>
+                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Aucune validation en attente.</td></tr>
               ) : (
                 paginated.map((v) => {
                   const d = pickDemande(v);
                   const validationUuid = v?.uuid;
                   const demandeUuid = d?.uuid || v?.demande_uuid || v?.demandeUuid;
+                  const commentaire = String(v?.commentaire ?? "").trim();
+                  const commentairePreview = commentaire.length > 80 ? `${commentaire.slice(0, 80)}…` : commentaire;
 
                   return (
                     <tr key={v.id} className="border-t border-gray-100 dark:border-gray-800">
@@ -223,6 +226,11 @@ export default function ValidationsPending() {
                       <td className="px-4 py-3">{formatMoney(d?.montant)} FCFA</td>
                       <td className="px-4 py-3">{labelDemandeStatut(d?.statut || v?.statut)}</td>
                       <td className="px-4 py-3">{formatDate(d?.created_at || v?.created_at)}</td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-[280px] truncate" title={commentaire || ""}>
+                          {commentairePreview || "-"}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex items-center gap-1">
                           {validationUuid ? (

@@ -39,6 +39,8 @@ export default function DemandeEditModal({
     files: [],
   });
 
+  const [docsTypeAutre, setDocsTypeAutre] = useState("");
+
   useEffect(() => {
     if (!open || !demande) return;
     setError("");
@@ -52,13 +54,10 @@ export default function DemandeEditModal({
       require_docs: false,
     });
     setDocs({ type_document: "proforma", files: [] });
+    setDocsTypeAutre("");
   }, [open, demande]);
 
   const montantPreview = useMemo(() => formatMoney(form.montant), [form.montant]);
-
-  const hasFournisseur = useMemo(() => {
-    return Boolean(demande?.fournisseur_id);
-  }, [demande?.fournisseur_id]);
 
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -68,11 +67,20 @@ export default function DemandeEditModal({
   };
 
   const validate = () => {
-    if (!canEditAll) return "Cette demande ne peut plus être modifiée (validation engagée).";
     if (!form.motif.trim()) return "Motif obligatoire";
-    if (!hasFournisseur && !form.beneficiaire.trim()) return "Bénéficiaire obligatoire";
+    if (!form.beneficiaire.trim()) return "Bénéficiaire obligatoire";
     if (!form.montant || Number.isNaN(Number(form.montant)) || Number(form.montant) <= 0) return "Montant invalide";
     if (form.require_docs && (!docs.files || docs.files.length === 0)) return "Veuillez joindre au moins un document.";
+
+    if (
+      form.require_docs &&
+      docs.files?.length &&
+      String(docs.type_document).toLowerCase() === "autre" &&
+      !docsTypeAutre.trim()
+    ) {
+      return "Veuillez préciser le type de document (Autre).";
+    }
+
     return "";
   };
 
@@ -90,7 +98,7 @@ export default function DemandeEditModal({
         motif: form.motif.trim(),
         description: form.description?.trim() || null,
         montant: String(Number(form.montant)),
-        ...(hasFournisseur ? {} : { beneficiaire: form.beneficiaire.trim() }),
+        beneficiaire: form.beneficiaire.trim(),
         remarque: form.remarque?.trim() || null,
       };
 
@@ -98,10 +106,15 @@ export default function DemandeEditModal({
       if (!res?.success) throw new Error(res?.message || "Modification échouée");
 
       if (canEditAll && form.require_docs && docs.files?.length) {
+        const typeDocumentToSend =
+          String(docs.type_document).toLowerCase() === "autre"
+            ? `autre:${docsTypeAutre.trim()}`
+            : docs.type_document;
+
         await uploadManyDocuments({
           files: docs.files,
           demande_id: demande.id,
-          type_document: docs.type_document,
+          type_document: typeDocumentToSend,
         });
       }
 
@@ -129,7 +142,9 @@ export default function DemandeEditModal({
           <div>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Modifier la demande</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {canEditAll ? "Tous les champs sont modifiables." : "Seul le statut est modifiable (validation déjà commencée)."}
+              {canEditAll
+                ? "Tous les champs sont modifiables."
+                : "La demande semble engagée; vous pouvez essayer, le serveur refusera si verrouillée."}
             </p>
           </div>
 
@@ -147,16 +162,14 @@ export default function DemandeEditModal({
         <form noValidate onSubmit={onSubmit} className="mt-4 space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Motif">
-              <input value={form.motif} onChange={(e) => setField("motif", e.target.value)} className={fieldClass} disabled={!canEditAll} />
+              <input value={form.motif} onChange={(e) => setField("motif", e.target.value)} className={fieldClass} />
             </Field>
 
-            <Field label={hasFournisseur ? "Bénéficiaire (auto)" : "Bénéficiaire"}>
+            <Field label="Bénéficiaire">
               <input
                 value={form.beneficiaire}
                 onChange={(e) => setField("beneficiaire", e.target.value)}
                 className={fieldClass}
-                disabled={!canEditAll || hasFournisseur}
-                placeholder={hasFournisseur ? "Déduit du fournisseur" : undefined}
               />
             </Field>
 
@@ -165,21 +178,20 @@ export default function DemandeEditModal({
                 value={form.montant}
                 onChange={(e) => setField("montant", e.target.value)}
                 className={fieldClass}
-                disabled={!canEditAll}
                 placeholder="Ex: 500000"
               />
-              {canEditAll ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Aperçu: {montantPreview} FCFA</p> : null}
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Aperçu: {montantPreview} FCFA</p>
             </Field>
 
             <div />
           </div>
 
           <Field label="Description">
-            <textarea rows={4} value={form.description} onChange={(e) => setField("description", e.target.value)} className={fieldClass} disabled={!canEditAll} />
+            <textarea rows={4} value={form.description} onChange={(e) => setField("description", e.target.value)} className={fieldClass} />
           </Field>
 
           <Field label="Remarque">
-            <textarea rows={3} value={form.remarque} onChange={(e) => setField("remarque", e.target.value)} className={fieldClass} disabled={!canEditAll} />
+            <textarea rows={3} value={form.remarque} onChange={(e) => setField("remarque", e.target.value)} className={fieldClass} />
           </Field>
 
           {canEditAll ? (
@@ -202,7 +214,11 @@ export default function DemandeEditModal({
                 <Field label="Type document">
                   <select
                     value={docs.type_document}
-                    onChange={(e) => setDocs((p) => ({ ...p, type_document: e.target.value }))}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setDocs((p) => ({ ...p, type_document: v }));
+                      if (String(v).toLowerCase() !== "autre") setDocsTypeAutre("");
+                    }}
                     className={fieldClass}
                   >
                     {DOC_TYPES.map((t) => (
@@ -212,6 +228,17 @@ export default function DemandeEditModal({
                     ))}
                   </select>
                 </Field>
+
+                {String(docs.type_document).toLowerCase() === "autre" ? (
+                  <Field label="Préciser (Autre) *">
+                    <input
+                      value={docsTypeAutre}
+                      onChange={(e) => setDocsTypeAutre(e.target.value)}
+                      className={fieldClass}
+                      placeholder="Ex: facture, note, justificatif..."
+                    />
+                  </Field>
+                ) : null}
 
                 <Field label="Fichiers">
                   <input type="file" multiple onChange={(e) => setDocs((p) => ({ ...p, files: Array.from(e.target.files || []) }))} className="w-full text-sm" />
@@ -232,7 +259,7 @@ export default function DemandeEditModal({
             </button>
             <button
               type="submit"
-              disabled={submitting || !canEditAll}
+              disabled={submitting}
               className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
             >
               {submitting ? "Traitement..." : "Enregistrer"}

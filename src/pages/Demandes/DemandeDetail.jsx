@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { getDemande } from "../../services/demandes.services";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
 import CreatePaiementModal from "../Paiements/CreatePaiementModal";
 import DemandeEditModal from "./DemandeEditModal";
-import CreateBonCommandeModal from "../BonsCommande/CreateBonCommandeModal";
+import { createBonCommande } from "../../services/bonsCommande.service";
+import { emitToast } from "../../services/toastBus";
 import { downloadFile } from "../../utils/downloadFile";
 import { labelDemandeStatut, labelValidationStepStatus } from "../../utils/statusLabels";
 import { labelBonCommandeStatut } from "../../utils/statusLabels";
@@ -43,13 +44,29 @@ function StatusBadge({ status }) {
   );
 }
 
+function labelPaiementMode(mode) {
+  const v = String(mode || "").toUpperCase().replaceAll(" ", "");
+  if (v === "70/30" || v === "50/50" || v === "100/100") return v;
+  return v ? v : "-";
+}
+
+function TrancheBadge({ statut }) {
+  const v = String(statut || "").toLowerCase();
+  const paid = v === "paye" || v === "payee" || v === "payé" || v === "payée";
+  const cls = paid
+    ? "bg-emerald-600 text-white"
+    : "bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-200";
+  return <span className={`inline-flex items-center px-2 py-1 text-xs rounded-lg ${cls}`}>{paid ? "Payée" : "Prévue"}</span>;
+}
+
 export default function DemandeDetail() {
   const { uuid } = useParams();
+  const nav = useNavigate();
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
 
   const canPayRole = roles.includes("DAF") || roles.includes("COMPTABLE") || roles.includes("ADMIN");
-  const canDownloadPdf =
+  const canDownloadPdfRole =
     roles.includes("DEMANDEUR") ||
     roles.includes("DIRECTEUR") ||
     roles.includes("DAF") ||
@@ -62,22 +79,29 @@ export default function DemandeDetail() {
   const [error, setError] = useState("");
   const [demande, setDemande] = useState(null);
 
+  const statutLower = String(demande?.statut || "").toLowerCase();
+  const isDraft = statutLower === "draft" || statutLower === "brouillon";
+  const canDownloadPdf = canDownloadPdfRole && (!isDraft || roles.includes("ADMIN"));
+
   const [docsLoading, setDocsLoading] = useState(true);
   const [documents, setDocuments] = useState([]);
 
   const [payOpen, setPayOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [bcOpen, setBcOpen] = useState(false);
+  const [bcCreating, setBcCreating] = useState(false);
+  const [bcConfirmArmed, setBcConfirmArmed] = useState(false);
+  const bcConfirmTimerRef = useRef(null);
 
   const canPayThis = useMemo(() => {
     const s = String(demande?.statut || "").toLowerCase();
-    return canPayRole && (s === "approuvee" || s === "en_attente_paiement");
+    return canPayRole && (s === "approuvee" || s === "en_attente_paiement" || s === "receptionnee");
   }, [demande?.statut, canPayRole]);
 
   const canCreateBc = useMemo(() => {
     const s = String(demande?.statut || "").toLowerCase();
     const allowedRole = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DIRECTEUR") || roles.includes("RESPONSABLE") || roles.includes("DEMANDEUR");
-    return allowedRole && (s === "approuvee" || s === "en_attente_paiement");
+    const hasAnyBc = Array.isArray(demande?.bons_commande) && demande.bons_commande.length > 0;
+    return !hasAnyBc && allowedRole && (s === "approuvee" || s === "en_attente_paiement");
   }, [demande?.statut, roles]);
 
   // ✅ règle simple UI : si au moins un step valide => plus d'édition complète
@@ -102,6 +126,52 @@ export default function DemandeDetail() {
     const s = steps.find((x) => String(x?.status || "").toLowerCase() === "en_attente");
     return s || null;
   }, [demande?.validation_steps]);
+
+  const paiementConditions = useMemo(() => {
+    const raw = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
+    return raw
+      .filter(Boolean)
+      .slice()
+      .sort((a, b) => {
+        const pa = Number(a?.pourcentage ?? 0);
+        const pb = Number(b?.pourcentage ?? 0);
+        if (pb !== pa) return pb - pa;
+        return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+      });
+  }, [demande?.conditions_paiement]);
+
+  const paiementMode = useMemo(() => {
+    const direct = demande?.conditions_paiement_mode;
+    if (direct) return labelPaiementMode(direct);
+
+    const ps = paiementConditions.map((x) => Number(x?.pourcentage ?? 0)).filter((x) => Number.isFinite(x));
+    if (ps.length === 1 && ps[0] === 100) return "100/100";
+    if (ps.length === 2) {
+      const s = ps.slice().sort((a, b) => b - a);
+      if (s[0] === 70 && s[1] === 30) return "70/30";
+      if (s[0] === 50 && s[1] === 50) return "50/50";
+    }
+    return paiementConditions.length ? "PERSONNALISÉ" : "-";
+  }, [demande?.conditions_paiement_mode, paiementConditions]);
+
+  const unpaidTranches = useMemo(() => {
+    return paiementConditions.filter((t) => {
+      const statut = String(t?.statut || "").toLowerCase();
+      const paid =
+        statut === "paye" ||
+        statut === "payee" ||
+        statut === "payé" ||
+        statut === "payée" ||
+        Boolean(t?.paiement_id);
+      return !paid;
+    });
+  }, [paiementConditions]);
+
+  const remainingAmount = useMemo(() => {
+    return unpaidTranches.reduce((sum, t) => sum + Number(t?.montant_prevu ?? 0), 0);
+  }, [unpaidTranches]);
+
+  const nextTranche = unpaidTranches.length ? unpaidTranches[0] : null;
 
   const fetchDemande = async () => {
     setLoading(true);
@@ -130,6 +200,33 @@ export default function DemandeDetail() {
     }
   };
 
+  const documentsSorted = useMemo(() => {
+    const docs = Array.isArray(documents) ? documents : [];
+    return docs
+      .slice()
+      .sort((a, b) => {
+        const ta = String(a?.type_document || "").toLowerCase();
+        const tb = String(b?.type_document || "").toLowerCase();
+
+        // proforma en premier
+        const pa = ta === "proforma" ? 0 : 1;
+        const pb = tb === "proforma" ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+
+        // puis tri par date décroissante (fallback id)
+        const da = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const db = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        if (db !== da) return db - da;
+        return Number(b?.id || 0) - Number(a?.id || 0);
+      });
+  }, [documents]);
+
+  const proformaCount = useMemo(() => {
+    return (Array.isArray(documents) ? documents : []).filter(
+      (d) => String(d?.type_document || "").toLowerCase() === "proforma"
+    ).length;
+  }, [documents]);
+
   useEffect(() => {
     fetchDemande();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,6 +235,94 @@ export default function DemandeDetail() {
   useEffect(() => {
     if (demande?.id) fetchDocs(demande.id);
   }, [demande?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (bcConfirmTimerRef.current) {
+        clearTimeout(bcConfirmTimerRef.current);
+        bcConfirmTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const onCreateBcFromDemande = async () => {
+    if (bcCreating) return;
+
+    const demandeId = demande?.id;
+    if (!demandeId) {
+      emitToast({ variant: "error", message: "Demande introuvable" });
+      return;
+    }
+
+    const rawItems = Array.isArray(demande?.demande_items) ? demande.demande_items : [];
+    if (rawItems.length === 0) {
+      emitToast({ variant: "error", message: "Impossible: aucune ligne (item) sur la demande." });
+      return;
+    }
+
+    const items = rawItems
+      .map((it) => ({
+        designation: String(it?.designation || "").trim(),
+        quantite: Number(it?.quantite ?? 0),
+        prix_unitaire: it?.prix_unitaire !== "" && it?.prix_unitaire != null ? Number(it.prix_unitaire) : null,
+        unite: it?.unite ? String(it.unite).trim() : null,
+      }))
+      .filter((it) => it.designation && Number.isFinite(it.quantite) && it.quantite > 0);
+
+    if (items.length === 0) {
+      emitToast({
+        variant: "error",
+        message: "Aucune ligne valide (designation/quantité). Corrigez la demande puis réessayez.",
+      });
+      return;
+    }
+
+    try {
+      setBcCreating(true);
+
+      const payload = {
+        demande_id: demandeId,
+        date_commande: new Date().toISOString(),
+        statut: "brouillon",
+        items,
+      };
+
+      const res = await createBonCommande(payload);
+      if (!res?.success) throw new Error(res?.message || "Création bon de commande échouée");
+
+      const bc = res?.data;
+      emitToast({ variant: "success", message: "Bon de commande créé." });
+
+      const bcIdOrUuid = bc?.uuid || bc?.id;
+      if (bcIdOrUuid) nav(`/bons-commande/${bcIdOrUuid}`);
+      else fetchDemande();
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur création bon de commande" });
+    } finally {
+      setBcCreating(false);
+    }
+  };
+
+  const onCreateBcClick = async () => {
+    if (bcCreating) return;
+    if (!bcConfirmArmed) {
+      setBcConfirmArmed(true);
+      emitToast({ variant: "info", message: "Cliquez encore pour confirmer la création du bon de commande." });
+      if (bcConfirmTimerRef.current) clearTimeout(bcConfirmTimerRef.current);
+      bcConfirmTimerRef.current = setTimeout(() => {
+        setBcConfirmArmed(false);
+        bcConfirmTimerRef.current = null;
+      }, 4000);
+      return;
+    }
+
+    setBcConfirmArmed(false);
+    if (bcConfirmTimerRef.current) {
+      clearTimeout(bcConfirmTimerRef.current);
+      bcConfirmTimerRef.current = null;
+    }
+    await onCreateBcFromDemande();
+  };
 
   if (loading) return <div className="text-sm text-gray-500 dark:text-gray-400">Chargement...</div>;
   if (error) return <div className="text-sm text-red-600 dark:text-red-400">{error}</div>;
@@ -189,11 +374,8 @@ export default function DemandeDetail() {
 
           <button
             type="button"
-            disabled={!canEditAll}
-            onClick={() => canEditAll && setEditOpen(true)}
-            className={`px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 ${
-              canEditAll ? "" : "opacity-60 cursor-not-allowed"
-            }`}
+            onClick={() => setEditOpen(true)}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
             Modifier
           </button>
@@ -213,15 +395,17 @@ export default function DemandeDetail() {
 
           <button
             type="button"
-            disabled={!canCreateBc}
-            onClick={() => setBcOpen(true)}
+            disabled={!canCreateBc || bcCreating}
+            onClick={onCreateBcClick}
             className={`px-4 py-2 text-sm rounded-lg ${
-              canCreateBc
-                ? "bg-emerald-600 text-white hover:opacity-90"
+              canCreateBc && !bcCreating
+                ? bcConfirmArmed
+                  ? "bg-amber-500 text-white hover:opacity-90"
+                  : "bg-emerald-600 text-white hover:opacity-90"
                 : "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
             }`}
           >
-            Créer BC
+            {bcCreating ? "Création..." : bcConfirmArmed ? "Confirmer BC" : "Créer BC"}
           </button>
         </div>
       </div>
@@ -234,6 +418,66 @@ export default function DemandeDetail() {
         <Info label="Montant" value={`${formatMoney(demande?.montant)} FCFA`} />
         <Info label="Créée le" value={formatDateTime(demande?.created_at)} />
         <Info label="MàJ le" value={formatDateTime(demande?.updated_at)} />
+      </div>
+
+      {/* Conditions de paiement */}
+      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Conditions de paiement</div>
+            <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Mode: <span className="font-medium text-gray-800 dark:text-white/90">{paiementMode}</span>
+            </div>
+          </div>
+
+          <div className="text-sm text-gray-600 dark:text-gray-300">
+            <div>
+              Restant: <span className="font-medium">{formatMoney(remainingAmount)} FCFA</span>
+            </div>
+            <div>
+              Prochaine tranche: {nextTranche ? (
+                <span className="font-medium">
+                  {Number(nextTranche?.pourcentage ?? 0)}% ({formatMoney(nextTranche?.montant_prevu)} FCFA)
+                </span>
+              ) : (
+                <span className="font-medium">-</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {paiementConditions.length ? (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left bg-gray-50 dark:bg-gray-950">
+                <tr>
+                  <th className="px-3 py-2">Tranche</th>
+                  <th className="px-3 py-2">%</th>
+                  <th className="px-3 py-2">Montant prévu</th>
+                  <th className="px-3 py-2">Statut</th>
+                  <th className="px-3 py-2">Paiement</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paiementConditions.map((t, idx) => (
+                  <tr key={t.id ?? idx} className="border-t border-gray-100 dark:border-gray-800">
+                    <td className="px-3 py-2">Tranche {idx + 1}</td>
+                    <td className="px-3 py-2">{t?.pourcentage != null ? `${Number(t.pourcentage)}%` : "-"}</td>
+                    <td className="px-3 py-2">{t?.montant_prevu != null ? `${formatMoney(t.montant_prevu)} FCFA` : "-"}</td>
+                    <td className="px-3 py-2">
+                      <TrancheBadge statut={t?.statut} />
+                    </td>
+                    <td className="px-3 py-2">
+                      {t?.paiement_id ? <span className="font-mono text-xs">{String(t.paiement_id)}</span> : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucune tranche (ancien enregistrement ou non initialisé).</div>
+        )}
       </div>
 
       {/* Description */}
@@ -329,7 +573,11 @@ export default function DemandeDetail() {
       {/* Documents */}
       <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-gray-800 dark:text-white/90">Documents liés</div>
+          <div className="text-sm font-medium text-gray-800 dark:text-white/90">
+            Documents liés{proformaCount ? (
+              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">({proformaCount} proforma)</span>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={() => demande?.id && fetchDocs(demande.id)}
@@ -341,7 +589,7 @@ export default function DemandeDetail() {
 
         {docsLoading ? (
           <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Chargement documents...</div>
-        ) : documents.length === 0 ? (
+        ) : documentsSorted.length === 0 ? (
           <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
         ) : (
           <div className="mt-3 overflow-x-auto">
@@ -357,7 +605,7 @@ export default function DemandeDetail() {
                 </tr>
               </thead>
               <tbody>
-                {documents.map((doc) => (
+                {documentsSorted.map((doc) => (
                   <tr key={doc.id} className="border-t border-gray-100 dark:border-gray-800">
                     <td className="px-3 py-2">{doc.type_document}</td>
                     <td className="px-3 py-2">{doc.nom_fichier}</td>
@@ -365,14 +613,15 @@ export default function DemandeDetail() {
                     <td className="px-3 py-2">{doc.taille ? Number(doc.taille).toLocaleString("fr-FR") : "-"}</td>
                     <td className="px-3 py-2">{formatDateTime(doc.created_at)}</td>
                     <td className="px-3 py-2 text-right">
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                        }
                         className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                       >
                         Ouvrir
-                      </a>
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -388,13 +637,17 @@ export default function DemandeDetail() {
           <div className="text-sm font-medium text-gray-800 dark:text-white/90">Bons de commande</div>
           <button
             type="button"
-            disabled={!canCreateBc}
-            onClick={() => setBcOpen(true)}
+            disabled={!canCreateBc || bcCreating}
+            onClick={onCreateBcClick}
             className={`px-3 py-2 text-xs rounded-lg ${
-              canCreateBc ? "bg-emerald-600 text-white hover:opacity-90" : "bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-500"
+              canCreateBc && !bcCreating
+                ? bcConfirmArmed
+                  ? "bg-amber-500 text-white hover:opacity-90"
+                  : "bg-emerald-600 text-white hover:opacity-90"
+                : "bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-500"
             }`}
           >
-            Nouveau
+            {bcCreating ? "Création..." : bcConfirmArmed ? "Confirmer" : "Nouveau"}
           </button>
         </div>
 
@@ -427,16 +680,17 @@ export default function DemandeDetail() {
                       {Array.isArray(bc?.documents) && bc.documents.length ? (
                         <div className="flex flex-wrap gap-2">
                           {bc.documents.slice(0, 3).map((doc) => (
-                            <a
+                            <button
                               key={doc.id}
-                              href={doc.url}
-                              target="_blank"
-                              rel="noreferrer"
+                              type="button"
+                              onClick={() =>
+                                downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                              }
                               className="px-2 py-1 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                               title={doc.nom_fichier}
                             >
                               {doc.nom_fichier || doc.type_document || "document"}
-                            </a>
+                            </button>
                           ))}
                           {bc.documents.length > 3 ? (
                             <span className="text-xs text-gray-500 dark:text-gray-400">+{bc.documents.length - 3}</span>
@@ -512,15 +766,6 @@ export default function DemandeDetail() {
         }}
       />
 
-      {/* Modal bon de commande */}
-      <CreateBonCommandeModal
-        open={bcOpen}
-        demande={demande}
-        onClose={() => setBcOpen(false)}
-        onCreated={() => {
-          fetchDemande();
-        }}
-      />
     </div>
   );
 }

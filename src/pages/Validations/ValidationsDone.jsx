@@ -174,17 +174,18 @@ export default function ValidationsDone() {
                 <th className="px-4 py-3">Montant</th>
                 <th className="px-4 py-3">Résultat</th>
                 <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Commentaire</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={6}>Chargement...</td></tr>
+                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Chargement...</td></tr>
               ) : error ? (
-                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={6}>{error}</td></tr>
+                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={7}>{error}</td></tr>
               ) : paginated.length === 0 ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={6}>Aucun historique.</td></tr>
+                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Aucun historique.</td></tr>
               ) : (
                 paginated.map((v) => {
                   const d = pickDemande(v);
@@ -192,6 +193,8 @@ export default function ValidationsDone() {
                   const uuid = v?.uuid || v?.validation_uuid || v?.validationUuid;
                   const status = labelValidationStepStatus(v?.status);
                   const date = v?.validated_at || v?.updated_at || v?.created_at || d?.updated_at;
+                  const commentaire = String(v?.commentaire ?? "").trim();
+                  const commentairePreview = commentaire.length > 80 ? `${commentaire.slice(0, 80)}…` : commentaire;
 
                   return (
                     <tr key={v.id} className="border-t border-gray-100 dark:border-gray-800">
@@ -200,6 +203,11 @@ export default function ValidationsDone() {
                       <td className="px-4 py-3">{formatMoney(d?.montant)} FCFA</td>
                       <td className="px-4 py-3">{status}</td>
                       <td className="px-4 py-3">{formatDate(date)}</td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-[280px] truncate" title={commentaire || ""}>
+                          {commentairePreview || "-"}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         {uuid ? (
                           <Link

@@ -124,7 +124,6 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   DG: [
-    { section: "main", icon: <PageIcon />, name: "Demandes", path: "/demandes/all" },
     {
       section: "main",
       icon: <ListIcon />,
@@ -138,7 +137,6 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   DGA: [
-    { section: "main", icon: <PageIcon />, name: "Demandes", path: "/demandes/all" },
     {
       section: "main",
       icon: <ListIcon />,
@@ -159,6 +157,9 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
       subItems: [
         { name: "Utilisateurs", path: "/admin/users" },
         { name: "Hiérarchie", path: "/admin/hierarchy" },
+        { name: "Directions", path: "/admin/directions" },
+        { name: "Départements", path: "/admin/departements" },
+        { name: "Services", path: "/admin/services" },
         { name: "Agents", path: "/admin/agents" },
         { name: "Délégations", path: "/admin/delegations" },
       ],

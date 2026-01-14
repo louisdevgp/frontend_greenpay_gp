@@ -23,6 +23,8 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
         files: [],
     });
 
+    const [docsTypeAutre, setDocsTypeAutre] = useState("");
+
     useEffect(() => {
         if (!open) return;
         setSubmitting(false);
@@ -37,6 +39,7 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
             require_docs: true,
         });
         setDocs({ type_document: "pv_reception", files: [] });
+        setDocsTypeAutre("");
     }, [open]);
 
     const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -51,6 +54,16 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
         if (!form.date_reception) return "Date réception obligatoire";
         if (!form.description.trim()) return "Description obligatoire";
         if (form.require_docs && (!docs.files?.length)) return "Veuillez joindre au moins un document";
+
+        if (
+            form.require_docs &&
+            docs.files?.length &&
+            String(docs.type_document).toLowerCase() === "autre" &&
+            !docsTypeAutre.trim()
+        ) {
+            return "Veuillez préciser le type de document (Autre)";
+        }
+
         return "";
     };
 
@@ -81,9 +94,14 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
 
             const receptionId = res?.data?.id;
             if (form.require_docs && docs.files?.length && receptionId) {
+                const typeDocumentToSend =
+                    String(docs.type_document).toLowerCase() === "autre"
+                        ? `autre:${docsTypeAutre.trim()}`
+                        : docs.type_document;
+
                 await uploadManyDocuments({
                     files: docs.files,
-                    type_document: docs.type_document,
+                    type_document: typeDocumentToSend,
                     reception_id: receptionId,
                 });
             }
@@ -214,7 +232,11 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
                                 <Field label="Type document">
                                     <select
                                         value={docs.type_document}
-                                        onChange={(e) => setDocs((p) => ({ ...p, type_document: e.target.value }))}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            setDocs((p) => ({ ...p, type_document: v }));
+                                            if (String(v).toLowerCase() !== "autre") setDocsTypeAutre("");
+                                        }}
                                         className={fieldClass}
                                     >
                                         <option value="pv_reception">pv_reception</option>
@@ -223,6 +245,17 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
                                         <option value="autre">autre</option>
                                     </select>
                                 </Field>
+
+                                {String(docs.type_document).toLowerCase() === "autre" ? (
+                                    <Field label="Préciser (Autre)">
+                                        <input
+                                            value={docsTypeAutre}
+                                            onChange={(e) => setDocsTypeAutre(e.target.value)}
+                                            className={fieldClass}
+                                            placeholder="Ex: rapport, note..."
+                                        />
+                                    </Field>
+                                ) : null}
 
                                 <Field label="Fichiers">
                                     <input

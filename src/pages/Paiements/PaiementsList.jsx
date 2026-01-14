@@ -40,7 +40,7 @@ export default function PaiementsList() {
   );
 
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
 
   const fetchData = async () => {
     setLoading(true);
@@ -84,7 +84,7 @@ export default function PaiementsList() {
   const paged = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
-  }, [filtered, page]);
+  }, [filtered, page, pageSize]);
 
   return (
     <div className="space-y-4">
@@ -195,7 +195,18 @@ export default function PaiementsList() {
           </table>
         </div>
 
-        <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
+        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => {
+              setPageSize(s);
+              setPage(1);
+            }}
+          />
+        </div>
       </div>
     </div>
   );

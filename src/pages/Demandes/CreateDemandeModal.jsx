@@ -25,8 +25,8 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
     montant: "",
     devise: "XOF",
     beneficiaire: "",
-    fournisseur_id: "",
     remarque: "",
+    conditions_paiement_mode: "100/100",
     paiement_immediat: false,
     require_docs: false,
   });
@@ -46,6 +46,8 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
     files: [],
   });
 
+  const [docsTypeAutre, setDocsTypeAutre] = useState("");
+
   const montantNum = useMemo(() => {
     const n = Number(form.montant);
     return Number.isNaN(n) ? 0 : n;
@@ -53,15 +55,10 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
 
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
-  const hasFournisseur = useMemo(() => {
-    return String(form.fournisseur_id || "").trim().length > 0;
-  }, [form.fournisseur_id]);
-
   const validate = () => {
     if (!form.motif.trim()) return "Motif obligatoire";
-    if (!hasFournisseur && !form.beneficiaire.trim()) return "Bénéficiaire obligatoire";
+    if (!form.beneficiaire.trim()) return "Bénéficiaire obligatoire";
     if (!form.montant || Number.isNaN(Number(form.montant)) || Number(form.montant) <= 0) return "Montant invalide";
-    if (form.fournisseur_id && Number.isNaN(Number(form.fournisseur_id))) return "Fournisseur ID invalide";
 
     const effectiveItems = (items || [])
       .map((it) => ({
@@ -84,6 +81,16 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
     }
 
     if (form.require_docs && (!docs.files || docs.files.length === 0)) return "Veuillez joindre au moins un document.";
+
+    if (
+      form.require_docs &&
+      docs.files?.length &&
+      String(docs.type_document).toLowerCase() === "autre" &&
+      !docsTypeAutre.trim()
+    ) {
+      return "Veuillez préciser le type de document (Autre).";
+    }
+
     return "";
   };
 
@@ -96,12 +103,13 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
       montant: "",
       devise: "XOF",
       beneficiaire: "",
-      fournisseur_id: "",
       remarque: "",
+      conditions_paiement_mode: "100/100",
       paiement_immediat: false,
       require_docs: false,
     });
     setDocs({ type_document: "proforma", files: [] });
+    setDocsTypeAutre("");
     setItems([
       {
         designation: "",
@@ -154,9 +162,9 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
         description: form.description?.trim() || null,
         montant: String(Number(form.montant)),
         devise: form.devise || null,
-        ...(hasFournisseur ? {} : { beneficiaire: form.beneficiaire.trim() }),
-        fournisseur_id: form.fournisseur_id ? Number(form.fournisseur_id) : null,
+        beneficiaire: form.beneficiaire.trim(),
         remarque: form.remarque?.trim() || null,
+        conditions_paiement_mode: form.conditions_paiement_mode,
         paiement_immediat: !!form.paiement_immediat,
         items: cleanedItems.length ? cleanedItems : undefined,
       };
@@ -167,10 +175,15 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
       const demande = res.data;
 
       if (form.require_docs) {
+        const typeDocumentToSend =
+          String(docs.type_document).toLowerCase() === "autre"
+            ? `autre:${docsTypeAutre.trim()}`
+            : docs.type_document;
+
         await uploadManyDocuments({
           files: docs.files,
           demande_id: demande.id,
-          type_document: docs.type_document,
+          type_document: typeDocumentToSend,
         });
       }
 
@@ -217,13 +230,11 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
               />
             </Field>
 
-            <Field label={hasFournisseur ? "Bénéficiaire (auto)" : "Bénéficiaire *"}>
+            <Field label="Bénéficiaire *">
               <input
                 value={form.beneficiaire}
                 onChange={(e) => setField("beneficiaire", e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-                disabled={hasFournisseur}
-                placeholder={hasFournisseur ? "Déduit du fournisseur" : undefined}
               />
             </Field>
 
@@ -250,14 +261,6 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
               </select>
             </Field>
 
-            <Field label="Fournisseur (ID)">
-              <input
-                value={form.fournisseur_id}
-                onChange={(e) => setField("fournisseur_id", e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-                placeholder="Optionnel (ex: 12)"
-              />
-            </Field>
           </div>
 
           <div className="p-4 border border-gray-200 rounded-xl dark:border-gray-800">
@@ -378,6 +381,18 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
           </Field>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Conditions de paiement">
+              <select
+                value={form.conditions_paiement_mode}
+                onChange={(e) => setField("conditions_paiement_mode", e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              >
+                <option value="100/100">100/100</option>
+                <option value="70/30">70/30</option>
+                <option value="50/50">50/50</option>
+              </select>
+            </Field>
+
             <Field label="Paiement immédiat">
               <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                 <input
@@ -408,7 +423,11 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
                 <Field label="Type document">
                   <select
                     value={docs.type_document}
-                    onChange={(e) => setDocs((p) => ({ ...p, type_document: e.target.value }))}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setDocs((p) => ({ ...p, type_document: v }));
+                      if (String(v).toLowerCase() !== "autre") setDocsTypeAutre("");
+                    }}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
                   >
                     {DOC_TYPES.map((t) => (
@@ -416,6 +435,17 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
                     ))}
                   </select>
                 </Field>
+
+                {String(docs.type_document).toLowerCase() === "autre" ? (
+                  <Field label="Préciser (Autre) *">
+                    <input
+                      value={docsTypeAutre}
+                      onChange={(e) => setDocsTypeAutre(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="Ex: facture, note, justificatif..."
+                    />
+                  </Field>
+                ) : null}
 
                 <Field label="Fichiers *">
                   <input

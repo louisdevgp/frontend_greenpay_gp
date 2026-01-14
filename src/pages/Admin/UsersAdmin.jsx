@@ -4,7 +4,7 @@ import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
-import { listUsers, updateUser } from "../../services/users.admin.service";
+import { adminResetUserPassword, createUser, listUsers, softDeleteUser, updateUser } from "../../services/users.admin.service";
 import { listRoles } from "../../services/roles.service";
 import { setUserRoles } from "../../services/userRoles.service";
 
@@ -27,6 +27,14 @@ export default function UsersAdmin() {
   const [editUser, setEditUser] = useState(null);
   const [form, setForm] = useState({ nom: "", prenom: "", is_active: true, roles: [] });
 
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ email: "", nom: "", prenom: "", is_active: true, roles: [] });
+  const [createdPassword, setCreatedPassword] = useState("");
+
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetUser, setResetUser] = useState(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+
   const fetchAll = async () => {
     setLoading(true);
     setError("");
@@ -39,7 +47,7 @@ export default function UsersAdmin() {
       if (!uRes?.success) throw new Error(uRes?.message || "Erreur chargement users");
       if (!rRes?.success) throw new Error(rRes?.message || "Erreur chargement rôles");
 
-      setRows(uRes.items || []);
+      setRows(uRes?.data?.items || uRes?.items || []);
       setRoles(rRes.data || rRes.items || []);
     } catch (e) {
       setError(e?.message || "Erreur");
@@ -95,6 +103,80 @@ export default function UsersAdmin() {
     }
   };
 
+  const openCreate = () => {
+    setCreatedPassword("");
+    setCreateForm({ email: "", nom: "", prenom: "", is_active: true, roles: [] });
+    setCreateOpen(true);
+  };
+
+  const create = async () => {
+    const email = String(createForm.email || "").trim();
+    const nom = String(createForm.nom || "").trim();
+    const prenom = String(createForm.prenom || "").trim();
+    if (!email) return emitToast({ variant: "error", message: "Email obligatoire" });
+    if (!nom) return emitToast({ variant: "error", message: "Nom obligatoire" });
+    if (!prenom) return emitToast({ variant: "error", message: "Prénom obligatoire" });
+
+    setSaving(true);
+    try {
+      const res = await createUser({ email, nom, prenom, is_active: !!createForm.is_active });
+      if (!res?.success) throw new Error(res?.message || "Erreur création user");
+
+      const idOrUuid = res?.data?.uuid || res?.data?.id;
+      if (idOrUuid && (createForm.roles || []).length) {
+        const rolesRes = await setUserRoles(idOrUuid, uniq(createForm.roles));
+        if (!rolesRes?.success) throw new Error(rolesRes?.message || "Erreur update rôles");
+      }
+
+      setCreatedPassword(res?.data?.temporaryPassword || "");
+      emitToast({ variant: "success", message: "Utilisateur créé" });
+      await fetchAll();
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmDelete = async (u) => {
+    if (!u?.id && !u?.uuid) return;
+    setSaving(true);
+    try {
+      const idOrUuid = u.uuid || u.id;
+      const res = await softDeleteUser(idOrUuid);
+      if (!res?.success) throw new Error(res?.message || "Erreur suppression utilisateur");
+      emitToast({ variant: "success", message: "Utilisateur supprimé" });
+      await fetchAll();
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openReset = (u) => {
+    setResetUser(u);
+    setResetPasswordValue("");
+    setResetOpen(true);
+  };
+
+  const doReset = async () => {
+    if (!resetUser?.id && !resetUser?.uuid) return;
+    setSaving(true);
+    try {
+      const idOrUuid = resetUser.uuid || resetUser.id;
+      const res = await adminResetUserPassword(idOrUuid);
+      if (!res?.success) throw new Error(res?.message || "Erreur reset mot de passe");
+      setResetPasswordValue(res?.data?.temporaryPassword || "");
+      emitToast({ variant: "success", message: "Mot de passe réinitialisé" });
+      await fetchAll();
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <PageMeta title="Administration - Utilisateurs" description="Gestion des utilisateurs" />
@@ -135,6 +217,13 @@ export default function UsersAdmin() {
             >
               Filtrer
             </button>
+
+            <button
+              onClick={openCreate}
+              className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800"
+            >
+              Nouveau
+            </button>
           </div>
         </div>
 
@@ -172,12 +261,26 @@ export default function UsersAdmin() {
                     <td className="px-4 py-3">{(u.roles || []).join(", ") || "-"}</td>
                     <td className="px-4 py-3">{u.is_active ? "Oui" : "Non"}</td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => openEdit(u)}
-                        className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
-                      >
-                        Modifier
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => openEdit(u)}
+                          className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+                        >
+                          Modifier
+                        </button>
+                        <button
+                          onClick={() => openReset(u)}
+                          className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+                        >
+                          Reset MDP
+                        </button>
+                        <button
+                          onClick={() => confirmDelete(u)}
+                          className="px-3 py-1.5 text-xs font-medium border border-red-200 text-red-700 rounded-lg dark:border-red-900/40 dark:text-red-300"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -188,6 +291,157 @@ export default function UsersAdmin() {
       </div>
 
       <Modal
+        isOpen={createOpen}
+        onClose={() => {
+          if (saving) return;
+          setCreateOpen(false);
+          setCreatedPassword("");
+        }}
+        title="Créer utilisateur"
+        className="max-w-[700px] m-4"
+      >
+        <div className="no-scrollbar max-h-[calc(100vh-2rem)] overflow-y-auto p-4 pr-14 lg:p-6">
+          <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Email</label>
+            <input
+              value={createForm.email}
+              onChange={(e) => setCreateForm((p) => ({ ...p, email: e.target.value }))}
+              className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400">Nom</label>
+              <input
+                value={createForm.nom}
+                onChange={(e) => setCreateForm((p) => ({ ...p, nom: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400">Prénom</label>
+              <input
+                value={createForm.prenom}
+                onChange={(e) => setCreateForm((p) => ({ ...p, prenom: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              />
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+            <input
+              type="checkbox"
+              checked={!!createForm.is_active}
+              onChange={(e) => setCreateForm((p) => ({ ...p, is_active: e.target.checked }))}
+            />
+            Compte actif
+          </label>
+
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Rôles</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {roleNames.map((rn) => {
+                const checked = (createForm.roles || []).includes(rn);
+                return (
+                  <label key={rn} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? uniq([...(createForm.roles || []), rn])
+                          : (createForm.roles || []).filter((x) => x !== rn);
+                        setCreateForm((p) => ({ ...p, roles: next }));
+                      }}
+                    />
+                    {rn}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {createdPassword ? (
+            <div className="px-4 py-3 text-sm rounded-lg bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+              Mot de passe temporaire: <span className="font-mono">{createdPassword}</span>
+            </div>
+          ) : null}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => {
+                setCreateOpen(false);
+                setCreatedPassword("");
+              }}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+            >
+              Fermer
+            </button>
+            <button
+              onClick={create}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
+            >
+              {saving ? <Loader inline size="sm" label="Traitement..." /> : "Créer"}
+            </button>
+          </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={resetOpen}
+        onClose={() => {
+          if (saving) return;
+          setResetOpen(false);
+          setResetUser(null);
+          setResetPasswordValue("");
+        }}
+        title="Réinitialiser mot de passe"
+        className="max-w-[700px] m-4"
+      >
+        <div className="no-scrollbar max-h-[calc(100vh-2rem)] overflow-y-auto p-4 pr-14 lg:p-6">
+          <div className="space-y-3">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Utilisateur: <b>{resetUser?.email || ""}</b>
+          </p>
+
+          {resetPasswordValue ? (
+            <div className="px-4 py-3 text-sm rounded-lg bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+              Nouveau mot de passe temporaire: <span className="font-mono">{resetPasswordValue}</span>
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500 dark:text-gray-400">Un mot de passe temporaire sera généré.</div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => {
+                setResetOpen(false);
+                setResetUser(null);
+                setResetPasswordValue("");
+              }}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+            >
+              Fermer
+            </button>
+            <button
+              onClick={doReset}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
+            >
+              {saving ? <Loader inline size="sm" label="Traitement..." /> : "Réinitialiser"}
+            </button>
+          </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={editOpen}
         onClose={() => {
           if (saving) return;
@@ -195,8 +449,10 @@ export default function UsersAdmin() {
           setEditUser(null);
         }}
         title="Modifier utilisateur"
+        className="max-w-[700px] m-4"
       >
-        <div className="space-y-3">
+        <div className="no-scrollbar max-h-[calc(100vh-2rem)] overflow-y-auto p-4 pr-14 lg:p-6">
+          <div className="space-y-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="block text-xs text-gray-500 dark:text-gray-400">Nom</label>
@@ -267,6 +523,7 @@ export default function UsersAdmin() {
             >
               {saving ? <Loader inline size="sm" label="Traitement..." /> : "Enregistrer"}
             </button>
+          </div>
           </div>
         </div>
       </Modal>
