@@ -55,6 +55,7 @@ import DelegationsAdmin from "./pages/Admin/DelegationsAdmin";
 import DirectionsAdmin from "./pages/Admin/DirectionsAdmin";
 import DepartementsAdmin from "./pages/Admin/DepartementsAdmin";
 import ServicesAdmin from "./pages/Admin/ServicesAdmin";
+import PermissionsAdmin from "./pages/Admin/PermissionsAdmin";
 
 
 // (optionnel) page 403
@@ -134,6 +135,7 @@ export default function App() {
               {/* Admin : ADMIN only */}
               <Route element={<RoleGuard allow={["ADMIN"]} />}>
                 <Route path="/admin/users" element={<UsersAdmin />} />
+                <Route path="/admin/permissions" element={<PermissionsAdmin />} />
                 <Route path="/admin/hierarchy" element={<HierarchyAdmin />} />
                 <Route path="/admin/directions" element={<DirectionsAdmin />} />
                 <Route path="/admin/departements" element={<DepartementsAdmin />} />

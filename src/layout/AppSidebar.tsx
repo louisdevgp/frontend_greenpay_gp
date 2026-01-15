@@ -156,6 +156,7 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
       name: "Administration",
       subItems: [
         { name: "Utilisateurs", path: "/admin/users" },
+        { name: "Permissions", path: "/admin/permissions" },
         { name: "Hiérarchie", path: "/admin/hierarchy" },
         { name: "Directions", path: "/admin/directions" },
         { name: "Départements", path: "/admin/departements" },

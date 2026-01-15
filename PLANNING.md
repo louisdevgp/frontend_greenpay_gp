@@ -75,6 +75,9 @@ Note flows (sélectionnés côté back selon le rôle du demandeur):
 - [x] Normaliser les libellés statuts (soumise, validation_x, approuvee, paye, receptionnee, cloture, rejete)
 - [ ] Vérifier navigation/403/404 et protection des routes
 
+## 8bis) Administration (permissions)
+- [x] Ajouter une page `/admin/permissions` (ADMIN only) pour cocher/décocher les permissions par rôle
+
 ## 9) UX Dates
 - [x] Remplacer tous les filtres date (listes) par un DatePicker
 - [x] Remplacer le filtre mois du dashboard par un DatePicker (format `YYYY-MM`)
