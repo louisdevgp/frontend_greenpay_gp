@@ -64,6 +64,7 @@ export default function DemandeDetail() {
   const nav = useNavigate();
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const userAgentId = user?.agent?.id != null ? Number(user.agent.id) : null;
 
   const canPayRole = roles.includes("DAF") || roles.includes("COMPTABLE") || roles.includes("ADMIN");
   const canDownloadPdfRole =
@@ -120,6 +121,13 @@ export default function DemandeDetail() {
   }, [demande?.statut, hasAnyValidation]);
 
   const canEditAll = !isEngaged;
+
+  const canEditThisDemande = useMemo(() => {
+    const isAdmin = roles.includes("ADMIN");
+    const demandeurId = demande?.demandeur_id != null ? Number(demande.demandeur_id) : null;
+    const isOwner = userAgentId != null && demandeurId != null && userAgentId === demandeurId;
+    return canEditAll && (isAdmin || isOwner);
+  }, [canEditAll, demande?.demandeur_id, roles, userAgentId]);
 
   const currentStep = useMemo(() => {
     const steps = Array.isArray(demande?.validation_steps) ? demande.validation_steps : [];
@@ -374,8 +382,11 @@ export default function DemandeDetail() {
 
           <button
             type="button"
-            onClick={() => setEditOpen(true)}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            disabled={!canEditThisDemande}
+            onClick={() => canEditThisDemande && setEditOpen(true)}
+            className={`px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 ${
+              canEditThisDemande ? "hover:bg-gray-50 dark:hover:bg-gray-950" : "opacity-50 cursor-not-allowed"
+            }`}
           >
             Modifier
           </button>
@@ -748,7 +759,7 @@ export default function DemandeDetail() {
         open={editOpen}
         onClose={() => setEditOpen(false)}
         demande={demande}
-        canEditAll={canEditAll}
+        canEditAll={canEditThisDemande}
         onUpdated={() => {
           fetchDemande();
           demande?.id && fetchDocs(demande.id);

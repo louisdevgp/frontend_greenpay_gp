@@ -182,7 +182,7 @@ export default function DemandesMyList() {
         open={openEdit}
         onClose={() => setOpenEdit(false)}
         demande={selectedDemande}
-        canEditAll={true}
+        canEditAll={canEditDemande(selectedDemande)}
         onUpdated={() => {
           setOpenEdit(false);
           fetchData();
@@ -262,11 +262,17 @@ export default function DemandesMyList() {
 
                         <button
                           type="button"
+                          disabled={!canEditDemande(d)}
                           onClick={() => {
+                            if (!canEditDemande(d)) return;
                             setSelectedDemande(d);
                             setOpenEdit(true);
                           }}
-                          className="inline-flex p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                          className={`inline-flex p-2 border border-gray-200 rounded-lg dark:border-gray-800 ${
+                            canEditDemande(d)
+                              ? "hover:bg-gray-50 dark:hover:bg-gray-950"
+                              : "opacity-50 cursor-not-allowed"
+                          }`}
                           title="Modifier"
                         >
                           <PencilIcon />

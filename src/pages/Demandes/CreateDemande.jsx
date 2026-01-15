@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createDemande } from "../../services/demandes.services";
 import { uploadManyDocuments } from "../../services/documents.service";
@@ -68,7 +68,22 @@ export default function CreateDemande() {
     return Number.isFinite(sum) ? sum : 0;
   }, [items]);
 
+  const hasPricedItems = useMemo(() => {
+    return (items || []).some((it) => String(it?.prix_unitaire ?? "").trim() !== "");
+  }, [items]);
+
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  // ✅ Si l'utilisateur saisit des PU, on aligne automatiquement le montant sur le total des items.
+  useEffect(() => {
+    if (!hasPricedItems) return;
+    const rounded = Math.round(itemsTotal);
+    setForm((p) => {
+      const current = Number(p.montant);
+      if (Number.isFinite(current) && Math.round(current) === rounded) return p;
+      return { ...p, montant: String(rounded) };
+    });
+  }, [hasPricedItems, itemsTotal]);
 
   const validate = () => {
     if (!form.motif.trim()) return "Motif obligatoire";
@@ -92,6 +107,13 @@ export default function CreateDemande() {
       if (it.prix_unitaire) {
         const pu = Number(it.prix_unitaire);
         if (!Number.isFinite(pu) || pu < 0) return "Prix unitaire invalide sur une ligne";
+      }
+    }
+
+    if (hasPricedItems) {
+      const diff = Math.abs(Number(form.montant) - itemsTotal);
+      if (!Number.isFinite(diff) || diff > 0.01) {
+        return `Le montant doit être égal au total des items (${formatMoney(itemsTotal)} FCFA).`;
       }
     }
 
@@ -140,10 +162,12 @@ export default function CreateDemande() {
               : null,
         }));
 
+      const montantToSend = hasPricedItems ? String(Math.round(itemsTotal)) : String(Number(form.montant));
+
       const payload = {
         motif: form.motif.trim(),
         description: form.description?.trim() || null,
-        montant: String(Number(form.montant)),
+        montant: montantToSend,
         devise: form.devise || null,
         beneficiaire: form.beneficiaire.trim(),
         remarque: form.remarque?.trim() || null,
@@ -258,12 +282,18 @@ export default function CreateDemande() {
             <input
               value={form.montant}
               onChange={(e) => setField("montant", e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              disabled={hasPricedItems}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
               placeholder="Ex: 500000"
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Aperçu: {formatMoney(montantNum)} FCFA
             </p>
+            {hasPricedItems ? (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Total items: <span className="font-medium">{formatMoney(itemsTotal)} FCFA</span> (montant auto)
+              </p>
+            ) : null}
           </Field>
 
           <Field label="Devise">
@@ -375,7 +405,7 @@ export default function CreateDemande() {
           </div>
 
           <div className="mt-3 text-sm text-gray-600 dark:text-gray-300">
-            Total items (indicatif): <span className="font-medium">{formatMoney(itemsTotal)} FCFA</span>
+            Total items: <span className="font-medium">{formatMoney(itemsTotal)} FCFA</span>
           </div>
         </div>
 

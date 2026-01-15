@@ -3,8 +3,11 @@ import axios from "axios";
 import { readStorage, removeStorage, STORAGE_KEYS } from "../utils/storage";
 import { emitToast } from "./toastBus";
 
-const BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000/api"; // adapte si besoin
+const inferredHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+const inferredApiPort = import.meta.env.VITE_API_PORT || "8000";
+const defaultApiUrl = `http://${inferredHost}:${inferredApiPort}/api`;
+
+const BASE_URL = import.meta.env.VITE_API_URL || defaultApiUrl;
 
 export const api = axios.create({
   baseURL: BASE_URL,

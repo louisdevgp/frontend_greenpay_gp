@@ -31,6 +31,8 @@ export default function DemandeEditModal({
     montant: "",
     beneficiaire: "",
     remarque: "",
+    conditions_paiement_mode: "100/100",
+    paiement_immediat: false,
     require_docs: false,
   });
 
@@ -45,12 +47,30 @@ export default function DemandeEditModal({
     if (!open || !demande) return;
     setError("");
     setSubmitting(false);
+
+    const conds = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
+    const modeFromText = String(conds?.[0]?.condition_texte || "").trim();
+    let inferredMode = "100/100";
+    if (modeFromText === "70/30" || modeFromText === "50/50" || modeFromText === "100/100") {
+      inferredMode = modeFromText;
+    } else if (conds.length === 2) {
+      const pcts = conds.map((c) => Number(c?.pourcentage)).filter((n) => Number.isFinite(n));
+      const s = pcts.sort((a, b) => b - a);
+      if (s.length === 2 && Math.round(s[0]) === 70 && Math.round(s[1]) === 30) inferredMode = "70/30";
+      if (s.length === 2 && Math.round(s[0]) === 50 && Math.round(s[1]) === 50) inferredMode = "50/50";
+    } else if (conds.length === 1) {
+      const pct = Number(conds?.[0]?.pourcentage);
+      if (Number.isFinite(pct) && Math.round(pct) === 100) inferredMode = "100/100";
+    }
+
     setForm({
       motif: demande.motif || "",
       description: demande.description || "",
       montant: demande.montant != null ? String(demande.montant) : "",
       beneficiaire: demande.beneficiaire || "",
       remarque: demande.remarque || "",
+      conditions_paiement_mode: inferredMode,
+      paiement_immediat: !!demande.paiement_immediat,
       require_docs: false,
     });
     setDocs({ type_document: "proforma", files: [] });
@@ -100,6 +120,8 @@ export default function DemandeEditModal({
         montant: String(Number(form.montant)),
         beneficiaire: form.beneficiaire.trim(),
         remarque: form.remarque?.trim() || null,
+        conditions_paiement_mode: form.conditions_paiement_mode,
+        paiement_immediat: !!form.paiement_immediat,
       };
 
       const res = await updateDemande(demande.uuid || demande.id, payload);
@@ -184,6 +206,34 @@ export default function DemandeEditModal({
             </Field>
 
             <div />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Conditions de paiement">
+              <select
+                value={form.conditions_paiement_mode}
+                onChange={(e) => setField("conditions_paiement_mode", e.target.value)}
+                className={fieldClass}
+              >
+                <option value="100/100">100/100</option>
+                <option value="70/30">70/30</option>
+                <option value="50/50">50/50</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Change l’échéancier (possible seulement si la demande n’est pas encore engagée).
+              </p>
+            </Field>
+
+            <Field label="Paiement immédiat">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={!!form.paiement_immediat}
+                  onChange={(e) => setField("paiement_immediat", e.target.checked)}
+                />
+                Oui
+              </label>
+            </Field>
           </div>
 
           <Field label="Description">
