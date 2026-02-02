@@ -4,11 +4,14 @@ import { uploadManyDocuments } from "../../services/documents.service";
 import { Modal } from "../../components/ui/modal";
 import DatePicker from "../../components/form/date-picker";
 
-export default function CreateReceptionModal({ open, paiement, demande, bon_commande_id, onClose, onCreated }) {
+export default function CreateReceptionModal({ open, paiement, demande, onClose, onCreated }) {
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    const isPaidDemande = ["paye", "cloture"].includes(String(demande?.statut || "").toLowerCase());
+    const canAfter = Boolean(paiement?.id) || isPaidDemande;
 
     const [form, setForm] = useState({
+        phase: "AVANT_PAIEMENT",
         date_reception: "",
         description: "",
         conforme: true,
@@ -27,9 +30,11 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
 
     useEffect(() => {
         if (!open) return;
+        const defaultPhase = canAfter ? "APRES_PAIEMENT" : "AVANT_PAIEMENT";
         setSubmitting(false);
         setError("");
         setForm({
+            phase: defaultPhase,
             date_reception: new Date().toISOString().slice(0, 10),
             description: "",
             conforme: true,
@@ -40,7 +45,7 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
         });
         setDocs({ type_document: "pv_reception", files: [] });
         setDocsTypeAutre("");
-    }, [open]);
+    }, [open, canAfter]);
 
     const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -51,6 +56,9 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
 
     const validate = () => {
         if (!paiement?.id && !demande?.id) return "Paiement ou demande introuvable";
+        if (!form.phase) return "Phase de réception obligatoire";
+        if (form.phase === "APRES_PAIEMENT" && !canAfter) return "Aucun paiement enregistré pour cette demande";
+        if (form.phase === "AVANT_PAIEMENT" && canAfter) return "Paiement déjà effectué : choisir Après paiement";
         if (!form.date_reception) return "Date réception obligatoire";
         if (!form.description.trim()) return "Description obligatoire";
         if (form.require_docs && (!docs.files?.length)) return "Veuillez joindre au moins un document";
@@ -80,7 +88,7 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
             const payload = {
                 ...(paiement?.id ? { paiement_id: paiement.id } : {}),
                 ...(demande?.id ? { demande_id: demande.id } : {}),
-                bon_commande_id: bon_commande_id ?? null,
+                phase: form.phase,
                 date_reception: new Date(form.date_reception).toISOString(),
                 conforme: !!form.conforme,
                 description: form.description.trim(),
@@ -150,6 +158,20 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
 
                 <form noValidate onSubmit={onSubmit} className="mt-4 space-y-4">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <Field label="Phase">
+                            <select
+                                value={form.phase}
+                                onChange={(e) => setField("phase", e.target.value)}
+                                className={fieldClass}
+                            >
+                                <option value="AVANT_PAIEMENT" disabled={canAfter}>Avant paiement</option>
+                                <option value="APRES_PAIEMENT" disabled={!canAfter}>Après paiement</option>
+                            </select>
+                            {!canAfter ? (
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">"Après paiement" disponible uniquement si un paiement existe.</p>
+                            ) : null}
+                        </Field>
+
                         <Field label="Date réception">
                             <DatePicker
                                 id="reception-date-reception"
@@ -169,6 +191,11 @@ export default function CreateReceptionModal({ open, paiement, demande, bon_comm
                                 />
                                 conforme
                             </label>
+                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {form.conforme
+                                    ? "Si conforme, le visa Directeur est appliqué automatiquement et envoyé au DAF."
+                                    : "Si non conforme, le visa Directeur se fera manuellement après correction."}
+                            </p>
                         </Field>
                     </div>
 

@@ -61,7 +61,7 @@ export default function AgentsAdmin() {
       if (!depRes?.success) throw new Error(depRes?.message || "Erreur chargement départements");
       if (!srvRes?.success) throw new Error(srvRes?.message || "Erreur chargement services");
 
-      setAgents(aRes.items || []);
+      setAgents(aRes?.items || aRes?.data?.items || []);
       setUsers(uRes?.data?.items || uRes?.items || []);
       setRoles(rRes.data || rRes.items || []);
       setDirections(dirRes.data || dirRes.items || []);

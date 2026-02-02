@@ -24,6 +24,12 @@ export async function rejectValidation(id, payload = {}) {
   return res.data;
 }
 
+// Retourner pour modification
+export async function returnValidationForModification(id, payload = {}) {
+  const res = await api.post(`/validations/${id}/return-for-modification`, payload);
+  return res.data;
+}
+
 export async function getValidationByUuid(uuid) {
   const res = await api.get(`/validations/uuid/${uuid}`); // adapte si ton endpoint diffère
   return res.data;

@@ -20,12 +20,14 @@ import { useAuth } from "../context/AuthContext.jsx";
 const ROLES = [
   "ADMIN",
   "DEMANDEUR",
+  "ASSISTANTE_TECHNIQUE",
   "RESPONSABLE",
   "DIRECTEUR",
   "DAF",
   "DGA",
   "DG",
   "COMPTABLE",
+  "CAISSE",
   ] as const;
 
 type Role = (typeof ROLES)[number];
@@ -55,10 +57,15 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
       name: "Mes demandes",
       subItems: [
         { name: "Mes demandes", path: "/demandes/my" },
-        { name: "Toutes les demandes", path: "/demandes/all" },
+        { name: "Demandes (périmètre)", path: "/demandes/all" },
         { name: "Nouvelle demande", path: "/demandes/create", new: true },
       ],
     },
+    { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
+  ],
+
+  ASSISTANTE_TECHNIQUE: [
+    { section: "main", icon: <PageIcon />, name: "Demandes (Direction)", path: "/demandes/all" },
     { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
   ],
 
@@ -69,7 +76,8 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
       icon: <PageIcon />,
       name: "Mes demandes",
       subItems: [
-        { name: "Liste", path: "/demandes/my" },
+        { name: "Mes demandes", path: "/demandes/my" },
+        { name: "Demandes (périmètre)", path: "/demandes/all" },
         { name: "Nouvelle demande", path: "/demandes/create", new: true },
       ],
     },
@@ -97,7 +105,10 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
         { name: "Délégations", path: "/delegations" },
       ],
     },
-    { section: "main", icon: <TableIcon />, name: "Réceptions", path: "/receptions" },
+    { section: "main", icon: <TableIcon />, name: "Réceptions", subItems: [
+      { name: "En attente", path: "/receptions/pending" },
+      { name: "Effectuées", path: "/receptions/done" },
+    ]},
   ],
 
   DAF: [
@@ -112,15 +123,27 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
       ],
     },
     { section: "main", icon: <TableIcon />, name: "Paiements", subItems: [
-      { name: "Mes paiements", path: "/paiements" },
+      { name: "En attente", path: "/paiements/pending" },
+      { name: "Effectuées", path: "/paiements/done" },
     ]},
     { section: "main", icon: <TableIcon />, name: "Réceptions", subItems: [
-      { name: "Mes receptions", path: "/receptions" },
+      { name: "En attente", path: "/receptions/pending" },
+      { name: "Effectuées", path: "/receptions/done" },
     ]},
   ],
 
   COMPTABLE: [
-    { section: "main", icon: <TableIcon />, name: "Paiements", path: "/paiements" },
+    { section: "main", icon: <TableIcon />, name: "Paiements", subItems: [
+      { name: "En attente", path: "/paiements/pending" },
+      { name: "Effectuées", path: "/paiements/done" },
+    ]},
+  ],
+
+  CAISSE: [
+    { section: "main", icon: <TableIcon />, name: "Paiements", subItems: [
+      { name: "En attente", path: "/paiements/pending" },
+      { name: "Effectuées", path: "/paiements/done" },
+    ]},
   ],
 
   DG: [
@@ -171,10 +194,21 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
 
 type AuthUser = {
   roles?: string[];
+  permissions?: string[];
   agent?: {
     delegations?: Array<{ role_name?: string | null }>;
   };
 };
+
+const ADMIN_SUBITEMS = [
+  { name: "Utilisateurs", path: "/admin/users", permission: "USERS_MANAGE" },
+  { name: "Permissions", path: "/admin/permissions", permission: "PERMISSIONS_MANAGE" },
+  { name: "Hiérarchie", path: "/admin/hierarchy", permission: "AGENTS_MANAGE" },
+  { name: "Directions", path: "/admin/directions", permission: "DIRECTIONS_MANAGE" },
+  { name: "Départements", path: "/admin/departements", permission: "DEPARTEMENTS_MANAGE" },
+  { name: "Services", path: "/admin/services", permission: "SERVICES_MANAGE" },
+  { name: "Agents", path: "/admin/agents", permission: "AGENTS_MANAGE" },
+];
 
 function normalizeRole(x: unknown): Role | null {
   if (!x) return null;
@@ -241,6 +275,12 @@ export default function AppSidebar() {
   const location = useLocation();
   const { user } = useAuth() as { user?: AuthUser };
 
+  const userPermissions = useMemo(
+    () => (user?.permissions || []).map((p) => String(p || "").trim()).filter(Boolean),
+    [user?.permissions]
+  );
+  const hasPermission = useCallback((code: string) => userPermissions.includes(code), [userPermissions]);
+
   // ✅ user.roles ex: ["COMPTABLE"]
   const dedicatedRole = useMemo(() => normalizeRole(user?.roles?.[0]) ?? null, [user?.roles]);
 
@@ -252,10 +292,31 @@ export default function AppSidebar() {
       .filter((x): x is Role => Boolean(x));
   }, [user?.agent?.delegations]);
 
-  const computedMenu = useMemo(
-    () => buildMenu(dedicatedRole, delegatedRoles),
-    [dedicatedRole, delegatedRoles]
-  );
+  const computedMenu = useMemo(() => {
+    // base menu from roles/delgations
+    let out = buildMenu(dedicatedRole, delegatedRoles);
+
+    // remove old role-based admin menu (we re-add it based on permissions)
+    out = out.filter((x) => String(x?.name || "").toLowerCase() !== "administration");
+
+    const adminSubItems = ADMIN_SUBITEMS.filter((s) => hasPermission(s.permission)).map(({ name, path }) => ({
+      name,
+      path,
+    }));
+
+    if (adminSubItems.length) {
+      out = mergeMenus(out, [
+        {
+          section: "main",
+          icon: <BoxCubeIcon />,
+          name: "Administration",
+          subItems: adminSubItems,
+        },
+      ]);
+    }
+
+    return out;
+  }, [dedicatedRole, delegatedRoles, hasPermission]);
 
   const navItems = useMemo(
     () => computedMenu.filter((x) => (x.section ?? "main") === "main"),

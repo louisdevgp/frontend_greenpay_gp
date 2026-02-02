@@ -1,213 +1,235 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { FiEye, FiRefreshCw } from "react-icons/fi";
 import { listPaiements } from "../../services/paiements.service";
 import Pagination from "../../components/common/Pagination";
-import { loadPersistedState, clearPersistedState, savePersistedState} from "../../utils/persistedFilters";
-import FullscreenLoader from "../../components/common/FullScreenLoader";
-import DatePicker from "../../components/form/date-picker";
+import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
+import DatePicker from "../../components/form/date-picker";
+import { useAuth } from "../../context/AuthContext";
+import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 
-function EyeIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
+const STORAGE_KEY = "filters:paiements:list";
+
+function formatDate(input) {
+  if (!input) return "";
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
 }
 
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
-function formatDate(iso) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return new Intl.DateTimeFormat("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-}
-
-const LS_KEY = "filters:paiements:list";
+const initialState = {
+  filters: { beneficiaire: "", dateStart: "", dateEnd: "" },
+  page: 1,
+  pageSize: 10,
+};
 
 export default function PaiementsList() {
+  const { user } = useAuth();
+  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [rows, setRows] = useState([]);
+  const [data, setData] = useState([]);
+  const [filtered, setFiltered] = useState([]);
 
-  const [filters, setFilters] = useState(() =>
-    loadPersistedState(LS_KEY, { moyen: "", type: "", demande_uuid: "", dateStart: "", dateEnd: "" })
-  );
+  const [state, setState] = useState(() => {
+    const saved = loadPersistedState(STORAGE_KEY);
+    return saved ? { ...initialState, ...saved } : initialState;
+  });
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  const fetchData = async () => {
+  const fetch = async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await listPaiements();
+      const params = {
+        page: state.page,
+        pageSize: state.pageSize,
+        ...(state.filters.beneficiaire ? { beneficiaire: state.filters.beneficiaire } : {}),
+        ...(state.filters.dateStart ? { dateStart: state.filters.dateStart } : {}),
+        ...(state.filters.dateEnd ? { dateEnd: state.filters.dateEnd } : {}),
+      };
+
+      const res = await listPaiements(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement paiements");
-      setRows(res.data || []);
+      setData(res.data || []);
+      setFiltered(res.data || []);
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
+      setData([]);
+      setFiltered([]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
-  useEffect(() => { savePersistedState(LS_KEY, filters); setPage(1); }, [filters]);
+  useEffect(() => {
+    fetch();
+  }, [state.page, state.pageSize, state.filters]);
 
-  const filtered = useMemo(() => {
-    return (rows || []).filter((p) => {
-      const moyen = String(p?.moyen_paiement || "");
-      const type = String(p?.type_paiement || "");
-      const demandeUuid = String(p?.demandes_paiement?.uuid || p?.demande_uuid || "");
-      const createdAt = p?.created_at || p?.date_paiement;
+  useEffect(() => {
+    if (state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {
+      const filtered = (data || []).filter((p) => {
+        if (state.filters.beneficiaire && !String(p.beneficiaire || "").toLowerCase().includes(String(state.filters.beneficiaire).toLowerCase()))
+          return false;
+        if (state.filters.dateStart && new Date(p.created_at) < new Date(parseDateOnlyStart(state.filters.dateStart))) return false;
+        if (state.filters.dateEnd && new Date(p.created_at) > new Date(parseDateOnlyEnd(state.filters.dateEnd))) return false;
+        return true;
+      });
+      setFiltered(filtered);
+    } else {
+      setFiltered(data || []);
+    }
+  }, [data, state.filters]);
 
-      const okMoyen = !filters.moyen || moyen.toLowerCase().includes(filters.moyen.toLowerCase());
-      const okType = !filters.type || type.toLowerCase().includes(filters.type.toLowerCase());
-      const okDemande = !filters.demande_uuid || demandeUuid.toLowerCase().includes(filters.demande_uuid.toLowerCase());
+  const resetFilters = () => {
+    const newState = { ...initialState, page: 1 };
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+  };
 
-      const d = createdAt ? new Date(createdAt) : null;
-      const start = parseDateOnlyStart(filters.dateStart);
-      const end = parseDateOnlyEnd(filters.dateEnd);
-      const okStart = !start || (d && d >= start);
-      const okEnd = !end || (d && d <= end);
+  const updateFilter = (key, value) => {
+    const newFilters = { ...state.filters, [key]: value };
+    const newState = { ...state, filters: newFilters, page: 1 }; // Reset page when filter changes
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
+  };
 
-      return okMoyen && okType && okDemande && okStart && okEnd;
-    });
-  }, [rows, filters]);
+  const updatePagination = (page, pageSize) => {
+    const newState = { ...state, page, pageSize };
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+  };
 
   const total = filtered.length;
-  const paged = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, page, pageSize]);
+
+  const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
 
   return (
     <div className="space-y-4">
-      <FullscreenLoader show={loading} label="Chargement des paiements..." />
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Paiements effectuÃ©s</h1>
+        <button
+          onClick={() => window.location.reload()}
+          title="Actualiser"
+          aria-label="Actualiser"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+        >
+          <FiRefreshCw />
+        </button>
+      </div>
 
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Paiements</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Liste des paiements + documents.</p>
+      {error ? (
+        <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Bénéficiaire</label>
+            <input
+              type="text"
+              value={state.filters.beneficiaire}
+              onChange={(e) => updateFilter("beneficiaire", e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Recherche..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Du</label>
+            <DatePicker
+              value={state.filters.dateStart ? new Date(state.filters.dateStart) : null}
+              onChange={(d) => updateFilter("dateStart", d ? formatDate(d) : "")}
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Au</label>
+            <DatePicker
+              value={state.filters.dateEnd ? new Date(state.filters.dateEnd) : null}
+              onChange={(d) => updateFilter("dateEnd", d ? formatDate(d) : "")}
+              className="w-full"
+            />
+          </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="mt-3 flex gap-2">
           <button
-            type="button"
-            onClick={fetchData}
-            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+            onClick={resetFilters}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Rafraîchir
+            Réinitialiser
           </button>
-
           <button
-            type="button"
-            onClick={() => { clearPersistedState(LS_KEY); setFilters({ moyen: "", type: "", demande_uuid: "", dateStart: "", dateEnd: "" }); }}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            onClick={clearPersistedState.bind(null, STORAGE_KEY)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Reset filtres
+            Effacer filtres
           </button>
         </div>
       </div>
 
-      {/* filtres */}
-      <div className="grid grid-cols-1 gap-3 p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800 sm:grid-cols-5">
-        <input
-          value={filters.demande_uuid}
-          onChange={(e) => setFilters((p) => ({ ...p, demande_uuid: e.target.value }))}
-          placeholder="Filtrer demande uuid"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <input
-          value={filters.moyen}
-          onChange={(e) => setFilters((p) => ({ ...p, moyen: e.target.value }))}
-          placeholder="Filtrer moyen"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <input
-          value={filters.type}
-          onChange={(e) => setFilters((p) => ({ ...p, type: e.target.value }))}
-          placeholder="Filtrer type"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <DatePicker
-          id="paiements-start"
-          placeholder="Date début"
-          defaultDate={filters.dateStart || undefined}
-          onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateStart: dateStr }))}
-        />
-        <DatePicker
-          id="paiements-end"
-          placeholder="Date fin"
-          defaultDate={filters.dateEnd || undefined}
-          onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateEnd: dateStr }))}
-        />
-      </div>
-
-      {/* table */}
-      <div className="overflow-hidden bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left bg-gray-50 dark:bg-gray-950">
-              <tr>
-                <th className="px-4 py-3">UUID</th>
-                <th className="px-4 py-3">Demande</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Montant</th>
-                <th className="px-4 py-3">Moyen</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {error ? (
-                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={7}>{error}</td></tr>
-              ) : paged.length === 0 ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Aucun paiement.</td></tr>
-              ) : (
-                paged.map((p) => (
-                  <tr key={p.id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-4 py-3 font-mono text-xs">{p.uuid}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{p?.demandes_paiement?.uuid || p.demande_uuid || "-"}</td>
-                    <td className="px-4 py-3">{p.type_paiement}</td>
-                    <td className="px-4 py-3">{formatMoney(p.montant)} FCFA</td>
-                    <td className="px-4 py-3">{p.moyen_paiement}</td>
-                    <td className="px-4 py-3">{formatDate(p.date_paiement || p.created_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        to={`/paiements/${p.uuid}`}
-                        className="inline-flex p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                        title="Voir"
-                      >
-                        <EyeIcon />
-                      </Link>
+      {loading ? (
+        <div className="p-4 text-center">Chargement...</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucun paiement trouvé.</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Type</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Moyen</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                {filtered.map((paiement) => (
+                  <tr key={paiement.id}>
+                    <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{paiement.uuid}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiement.type_paiement}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiement.moyen_paiement || "-"}</td>
+                    <td className="px-4 py-3 text-sm">{formatMoney(paiement.montant)} FCFA</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiement.beneficiaire}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(paiement.created_at)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {canViewDetails ? (
+                        <Link
+                          to={`/paiements/${paiement.uuid}`}
+                          title="Voir"
+                          aria-label="Voir"
+                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                        >
+                          <FiEye />
+                        </Link>
+                      ) : (
+                        "-"
+                      )}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
           <Pagination
-            page={page}
-            pageSize={pageSize}
+            page={state.page}
+            pageSize={state.pageSize}
             total={total}
-            onPageChange={setPage}
-            onPageSizeChange={(s) => {
-              setPageSize(s);
-              setPage(1);
-            }}
+            onPageChange={(p) => updatePagination(p, state.pageSize)}
+            onPageSizeChange={(size) => updatePagination(1, size)}
           />
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,18 +1,13 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import { FiArrowLeft, FiCheckCircle, FiDownload, FiEye, FiRefreshCw, FiUpload, FiX } from "react-icons/fi";
 import { getReception, visaDaf, visaDirecteur } from "../../services/receptions.service";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
 import { Modal } from "../../components/ui/modal";
-import SignaturePad from "../../components/SignaturePad/SignaturePad";
-
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "-");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
+import { formatMoney } from "../../utils/formatUtils";
 
 function formatDateTime(iso) {
   if (!iso) return "-";
@@ -23,11 +18,19 @@ function formatDateTime(iso) {
   }).format(d);
 }
 
+function formatPhase(value) {
+  const v = String(value || "").trim().toUpperCase();
+  if (v === "AVANT_PAIEMENT") return "Avant paiement";
+  if (v === "APRES_PAIEMENT") return "Après paiement";
+  return "-";
+}
+
 export default function ReceptionDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
 
   const canDownloadPdfRole = roles.includes("COMPTABLE") || roles.includes("DAF") || roles.includes("DIRECTEUR") || roles.includes("ADMIN");
 
@@ -37,6 +40,17 @@ export default function ReceptionDetail() {
 
   const hasAllVisas = !!reception?.visa_directeur_id && !!reception?.visa_daf_id;
   const canDownloadPdf = canDownloadPdfRole && hasAllVisas;
+
+  const visaDirecteurAuto =
+    !!reception?.visa_directeur_id &&
+    !!reception?.conforme &&
+    Number(reception?.visa_directeur_id) === Number(reception?.recu_par_id);
+  const visaDirecteurValue = reception?.visa_directeur_id
+    ? `Oui${reception.visa_directeur_nom ? ` (${reception.visa_directeur_nom})` : ""}${visaDirecteurAuto ? " (auto)" : ""}`
+    : "Non";
+  const visaDafValue = reception?.visa_daf_id
+    ? `Oui${reception.visa_daf_nom ? ` (${reception.visa_daf_nom})` : ""}`
+    : "Non";
 
   const [docsLoading, setDocsLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
@@ -52,8 +66,7 @@ export default function ReceptionDetail() {
 
   const [visaModalOpen, setVisaModalOpen] = useState(false);
   const [visaKind, setVisaKind] = useState(null); // "directeur" | "daf" | null
-  const [visaSignature, setVisaSignature] = useState({ empty: true, dataUrl: "" });
-  const visaSignatureRef = useRef(null);
+  // On n'utilise plus les signatures
   const [visaCommentaire, setVisaCommentaire] = useState("");
   const [visaModalError, setVisaModalError] = useState("");
 
@@ -86,22 +99,30 @@ export default function ReceptionDetail() {
   useEffect(() => { fetchReception(); }, [uuid]);
   useEffect(() => { if (reception?.id) fetchDocs(reception.id); }, [reception?.id]);
 
-  const canVisaDirecteur = (roles.includes("DIRECTEUR") || roles.includes("ADMIN")) && !reception?.visa_directeur_id;
+  const directorByDelegation = delegatedRoles.includes("DIRECTEUR");
+  const directorRoleOnly = roles.includes("DIRECTEUR") && !roles.some((r) => ["DAF", "DG", "DGA"].includes(r));
+  const canVisaDirecteur = (directorRoleOnly || directorByDelegation || roles.includes("ADMIN")) && !reception?.visa_directeur_id;
   const canVisaDaf = (roles.includes("DAF") || roles.includes("ADMIN")) && !!reception?.visa_directeur_id && !reception?.visa_daf_id;
 
-  const doVisa = async (kind, signatureDataUrl, commentaire) => {
+  const doVisa = async (kind, commentaire) => {
     if (!reception?.id) return;
     setVisaError("");
     try {
       setVisaLoading(true);
       const commentaireTrimmed = (commentaire || "").trim();
       const payload = {
-        ...(signatureDataUrl ? { signature_data_url: signatureDataUrl } : {}),
+        // Plus de signature_data_url
         ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
       };
       const res = kind === "directeur" ? await visaDirecteur(reception.id, payload) : await visaDaf(reception.id, payload);
       if (!res?.success) throw new Error(res?.message || "Visa échoué");
       await fetchReception();
+      if (kind === "daf") {
+        const targetUuid = res?.data?.uuid || reception?.uuid || uuid;
+        if (targetUuid) {
+          downloadFile(`/receptions/${targetUuid}/pdf`, `reception_${targetUuid}.pdf`);
+        }
+      }
     } catch (e) {
       setVisaError(e?.message || "Erreur visa");
     } finally {
@@ -112,7 +133,6 @@ export default function ReceptionDetail() {
   const openVisaModal = (kind) => {
     setVisaModalError("");
     setVisaKind(kind);
-    setVisaSignature({ empty: true, dataUrl: "" });
     setVisaCommentaire("");
     setVisaModalOpen(true);
   };
@@ -121,7 +141,6 @@ export default function ReceptionDetail() {
     if (visaLoading) return;
     setVisaModalOpen(false);
     setVisaKind(null);
-    setVisaSignature({ empty: true, dataUrl: "" });
     setVisaCommentaire("");
     setVisaModalError("");
   };
@@ -130,12 +149,7 @@ export default function ReceptionDetail() {
     setVisaModalError("");
     try {
       if (!visaKind) throw new Error("Type de visa invalide");
-      // Fallback mobile/web: relire directement le canvas au submit
-      const liveEmpty = visaSignatureRef.current?.isEmpty?.() ?? true;
-      const liveDataUrl = visaSignatureRef.current?.getDataUrl?.() ?? "";
-      if (liveEmpty || !liveDataUrl) throw new Error("Signature obligatoire");
-      setVisaSignature({ empty: false, dataUrl: liveDataUrl });
-      await doVisa(visaKind, liveDataUrl, visaCommentaire);
+      await doVisa(visaKind, visaCommentaire);
       closeVisaModal();
     } catch (e) {
       setVisaModalError(e?.message || "Erreur visa");
@@ -181,7 +195,7 @@ export default function ReceptionDetail() {
         <div className="text-lg font-semibold text-gray-800 dark:text-white/90">
           {visaKind === "directeur" ? "Visa Directeur" : visaKind === "daf" ? "Visa DAF" : "Visa"}
         </div>
-        <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">Veuillez signer avant de valider.</div>
+        <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">Veuillez confirmer le visa.</div>
 
         {visaModalError ? (
           <div className="mt-3 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
@@ -189,18 +203,6 @@ export default function ReceptionDetail() {
           </div>
         ) : null}
 
-        <div className="mt-4">
-          <SignaturePad
-            ref={visaSignatureRef}
-            label="Signature (obligatoire)"
-            showStatus
-            showPreview
-            onChange={(v) => {
-              setVisaSignature(v);
-              if (!v?.empty) setVisaModalError("");
-            }}
-          />
-        </div>
 
         <div className="mt-4">
           <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire (optionnel)</div>
@@ -218,17 +220,21 @@ export default function ReceptionDetail() {
             type="button"
             disabled={visaLoading}
             onClick={closeVisaModal}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            title="Annuler"
+            aria-label="Annuler"
+            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
           >
-            Annuler
+            <FiX />
           </button>
           <button
             type="button"
             disabled={visaLoading}
             onClick={confirmVisa}
-            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+            title={visaLoading ? "Validation..." : "Valider"}
+            aria-label={visaLoading ? "Validation..." : "Valider"}
+            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
           >
-            {visaLoading ? "Validation..." : "Valider"}
+            <FiCheckCircle />
           </button>
         </div>
       </Modal>
@@ -238,8 +244,13 @@ export default function ReceptionDetail() {
           <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
             {error}
           </div>
-          <button onClick={() => nav(-1)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
-            Retour
+          <button
+            onClick={() => nav(-1)}
+            title="Retour"
+            aria-label="Retour"
+            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+          >
+            <FiArrowLeft />
           </button>
         </div>
       ) : null}
@@ -255,17 +266,24 @@ export default function ReceptionDetail() {
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => nav(-1)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
-                Retour
+              <button
+                onClick={() => nav(-1)}
+                title="Retour"
+                aria-label="Retour"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+              >
+                <FiArrowLeft />
               </button>
               {canDownloadPdf ? (
                 <>
                   <button
                     type="button"
                     onClick={() => downloadFile(`/receptions/${reception.uuid || uuid}/pdf`, `reception_${reception.uuid || uuid}.pdf`)}
-                    className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+                    title="Télécharger PDF"
+                    aria-label="Télécharger PDF"
+                    className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                   >
-                    Télécharger PDF
+                    <FiDownload />
                   </button>
                   <button
                     type="button"
@@ -274,17 +292,21 @@ export default function ReceptionDetail() {
                         mode: "preview",
                       })
                     }
-                    className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+                    title="Prévisualiser PDF"
+                    aria-label="Prévisualiser PDF"
+                    className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                   >
-                    Prévisualiser PDF
+                    <FiEye />
                   </button>
                 </>
               ) : null}
               <button
                 onClick={fetchReception}
-                className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                title="Rafraîchir"
+                aria-label="Rafraîchir"
+                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
               >
-                Rafraîchir
+                <FiRefreshCw />
               </button>
             </div>
           </div>
@@ -292,12 +314,13 @@ export default function ReceptionDetail() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Info label="Receveur" value={reception.receveur_nom || "-"} />
             <Info label="Date réception" value={formatDateTime(reception.date_reception)} />
+            <Info label="Phase" value={formatPhase(reception.phase)} />
             <Info label="Créé" value={formatDateTime(reception.created_at)} />
             <Info label="Conforme" value={reception.conforme ? "Oui" : "Non"} />
             <Info label="Réf. facture" value={reception.reference_facture || "-"} />
             <Info label="Montant" value={reception.montant != null ? `${formatMoney(reception.montant)} FCFA` : "-"} />
-            <Info label="Visa Directeur" value={reception.visa_directeur_id ? "Oui" : "Non"} />
-            <Info label="Visa DAF" value={reception.visa_daf_id ? "Oui" : "Non"} />
+            <Info label="Visa Directeur" value={visaDirecteurValue} />
+            <Info label="Visa DAF" value={visaDafValue} />
           </div>
 
           <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
@@ -323,43 +346,49 @@ export default function ReceptionDetail() {
                 type="button"
                 disabled={!canVisaDirecteur || visaLoading}
                 onClick={() => openVisaModal("directeur")}
-                className={`px-4 py-2 text-sm rounded-lg ${
+                title="Visa Directeur"
+                aria-label="Visa Directeur"
+                className={`inline-flex items-center justify-center p-2 rounded-lg ${
                   canVisaDirecteur
                     ? "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
                     : "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
                 }`}
               >
-                Visa Directeur
+                <FiCheckCircle />
               </button>
 
               <button
                 type="button"
                 disabled={!canVisaDaf || visaLoading}
                 onClick={() => openVisaModal("daf")}
-                className={`px-4 py-2 text-sm rounded-lg ${
+                title="Visa DAF"
+                aria-label="Visa DAF"
+                className={`inline-flex items-center justify-center p-2 rounded-lg ${
                   canVisaDaf
                     ? "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
                     : "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
                 }`}
               >
-                Visa DAF
+                <FiCheckCircle />
               </button>
             </div>
           </div>
 
           <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Paiement lié</div>
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Demande liée</div>
             <div className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              UUID: <span className="font-mono">{reception?.paiements?.uuid || reception?.paiement_uuid || "-"}</span>
+              UUID: <span className="font-mono">{reception?.demandes_paiement?.uuid || "-"}</span>
             </div>
 
-            {reception?.paiements?.uuid ? (
+            {reception?.demandes_paiement?.uuid ? (
               <div className="mt-3">
                 <Link
-                  to={`/paiements/${reception.paiements.uuid}`}
-                  className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+                  to={`/demandes/${reception.demandes_paiement.uuid}`}
+                  title="Voir demande"
+                  aria-label="Voir demande"
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                 >
-                  Voir paiement
+                  <FiEye />
                 </Link>
               </div>
             ) : null}
@@ -371,9 +400,11 @@ export default function ReceptionDetail() {
               <button
                 type="button"
                 onClick={() => reception?.id && fetchDocs(reception.id)}
-                className="px-3 py-2 text-xs border border-gray-200 rounded-lg dark:border-gray-800"
+                title="Recharger"
+                aria-label="Recharger"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
               >
-                Recharger
+                <FiRefreshCw />
               </button>
             </div>
 
@@ -430,13 +461,15 @@ export default function ReceptionDetail() {
                   type="button"
                   disabled={uploading || !uploadFiles.length}
                   onClick={doUpload}
-                  className={`px-4 py-2 text-sm rounded-lg ${
+                  title={uploading ? "Upload..." : "Uploader"}
+                  aria-label={uploading ? "Upload..." : "Uploader"}
+                  className={`inline-flex items-center justify-center p-2 rounded-lg ${
                     uploading || !uploadFiles.length
                       ? "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
                       : "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
                   }`}
                 >
-                  {uploading ? "Upload..." : "Uploader"}
+                  <FiUpload />
                 </button>
               </div>
             </div>

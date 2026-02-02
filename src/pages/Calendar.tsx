@@ -225,7 +225,9 @@ const Calendar: React.FC = () => {
                     id="event-start-date"
                     placeholder="YYYY-MM-DD"
                     defaultDate={eventStartDate || undefined}
-                    onChange={(_, dateStr) => setEventStartDate(dateStr)}
+                    onChange={(_date: Date | null, dateStr?: string) =>
+                      setEventStartDate(dateStr ?? "")
+                    }
                   />
                 </div>
               </div>
@@ -239,7 +241,9 @@ const Calendar: React.FC = () => {
                     id="event-end-date"
                     placeholder="YYYY-MM-DD"
                     defaultDate={eventEndDate || undefined}
-                    onChange={(_, dateStr) => setEventEndDate(dateStr)}
+                    onChange={(_date: Date | null, dateStr?: string) =>
+                      setEventEndDate(dateStr ?? "")
+                    }
                   />
                 </div>
               </div>

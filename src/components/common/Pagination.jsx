@@ -1,5 +1,5 @@
 import React from "react";
-
+import Loader from "./Loader"; // Assurez-vous que le chemin est correct
 
 export default function Pagination({
   page,
@@ -7,6 +7,7 @@ export default function Pagination({
   total,
   onPageChange,
   onPageSizeChange,
+  isLoading = false, // Nouveau prop pour gérer l'état de chargement
   pageSizeOptions = [5, 10, 20, 50],
 }) {
   const totalPages = Math.max(1, Math.ceil((total || 0) / pageSize));
@@ -26,7 +27,8 @@ export default function Pagination({
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange?.(Number(e.target.value))}
-          className="px-2 py-2 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
+          disabled={isLoading} // Désactiver le select pendant le chargement
+          className="px-2 py-2 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950 disabled:opacity-50"
         >
           {pageSizeOptions.map((s) => (
             <option key={s} value={s}>
@@ -35,38 +37,44 @@ export default function Pagination({
           ))}
         </select>
 
-        <button
-          type="button"
-          disabled={!canPrev}
-          onClick={() => onPageChange?.(1)}
-          className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
-        >
-          «
-        </button>
-        <button
-          type="button"
-          disabled={!canPrev}
-          onClick={() => onPageChange?.(page - 1)}
-          className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
-        >
-          Préc.
-        </button>
-        <button
-          type="button"
-          disabled={!canNext}
-          onClick={() => onPageChange?.(page + 1)}
-          className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
-        >
-          Suiv.
-        </button>
-        <button
-          type="button"
-          disabled={!canNext}
-          onClick={() => onPageChange?.(totalPages)}
-          className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
-        >
-          »
-        </button>
+        {isLoading ? (
+          <Loader inline size="sm" label="Chargement..." />
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={!canPrev}
+              onClick={() => onPageChange?.(1)}
+              className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
+            >
+              «
+            </button>
+            <button
+              type="button"
+              disabled={!canPrev}
+              onClick={() => onPageChange?.(page - 1)}
+              className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
+            >
+              Préc.
+            </button>
+            <button
+              type="button"
+              disabled={!canNext}
+              onClick={() => onPageChange?.(page + 1)}
+              className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
+            >
+              Suiv.
+            </button>
+            <button
+              type="button"
+              disabled={!canNext}
+              onClick={() => onPageChange?.(totalPages)}
+              className="px-3 py-2 text-xs border border-gray-200 rounded-lg disabled:opacity-50 dark:border-gray-800"
+            >
+              »
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

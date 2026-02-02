@@ -1,491 +1,433 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FiCheckCircle, FiX } from "react-icons/fi";
 import { createPaiement } from "../../services/paiements.service";
-import { uploadManyDocuments } from "../../services/documents.service";
+import { listAllDemandes } from "../../services/demandes.services";
 import { Modal } from "../../components/ui/modal";
-import DatePicker from "../../components/form/date-picker";
-import { getDemande } from "../../services/demandes.services";
-
-
-
-const MOYENS = ["virement", "cheque", "especes", "mobile_money"];
-const TYPE_PAIEMENT = [
-  { value: "total", label: "Total" },
-  { value: "partiel", label: "Partiel" },
-];
+import { emitToast } from "../../services/toastBus";
+import { formatMoney } from "../../utils/formatUtils";
+import { uploadManyDocuments } from "../../services/documents.service";
 
 function round2(v) {
-  const n = Number(v);
-  if (Number.isNaN(n) || !Number.isFinite(n)) return 0;
-  return Math.round(n * 100) / 100;
+  return Math.round(Number(v) * 100) / 100;
 }
 
-function amountsEqual(a, b, tolerance = 0.01) {
-  const na = Number(a);
-  const nb = Number(b);
-  if (!Number.isFinite(na) || !Number.isFinite(nb)) return false;
-  return Math.abs(na - nb) <= tolerance;
+const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement"]);
+
+function isPayableStatus(statut) {
+  return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
 }
 
-function deriveModeFromConditions(conds) {
-  const list = Array.isArray(conds) ? conds : [];
-  const pcts = list.map((c) => Number(c?.pourcentage)).filter((n) => Number.isFinite(n));
-  if (pcts.length === 1 && amountsEqual(pcts[0], 100, 0.01)) return "100/100";
-  if (pcts.length === 2) {
-    const a = round2(pcts[0]);
-    const b = round2(pcts[1]);
-    if (amountsEqual(a, 70, 0.01) && amountsEqual(b, 30, 0.01)) return "70/30";
-    if (amountsEqual(a, 50, 0.01) && amountsEqual(b, 50, 0.01)) return "50/50";
-  }
-  return null;
-}
-
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
-
-export default function CreatePaiementModal({ open, onClose, demande, onCreated }) {
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-
-  const [demandeResolved, setDemandeResolved] = useState(demande || null);
-  const [demandeResolving, setDemandeResolving] = useState(false);
-
+export default function CreatePaiementModal({ open, onClose, onCreated, defaultDemandeId = "" }) {
   const [form, setForm] = useState({
+    demande_id: "",
     type_paiement: "total",
     montant: "",
-    date_paiement: "",
-    moyen_paiement: "virement",
-    reference_piece: "",
-    compte_debite: "",
-    commentaire: "",
-    require_docs: true,
+    moyen_paiement: "",
   });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [demandes, setDemandes] = useState([]);
+  const [demandeResolved, setDemandeResolved] = useState(null);
+  const autoMoyenRef = useRef("");
+  const [uploadType, setUploadType] = useState("recu");
+  const [uploadTypeAutre, setUploadTypeAutre] = useState("");
+  const [uploadFiles, setUploadFiles] = useState([]);
 
-  const [docs, setDocs] = useState({
-    type_document: "preuve_paiement",
-    files: [],
-  });
-
-  const [docsTypeAutre, setDocsTypeAutre] = useState("");
-
-  useEffect(() => {
-    setDemandeResolved(demande || null);
-  }, [demande]);
-
-  useEffect(() => {
-    let alive = true;
-    const resolve = async () => {
-      if (!open) return;
-
-      const uuid = demande?.uuid || demande?.demande_uuid;
-      const hasConditions = Array.isArray(demande?.conditions_paiement) && demande.conditions_paiement.length > 0;
-
-      // When opening from list views, demande may be a light payload without conditions.
-      if (!uuid || hasConditions) {
-        setDemandeResolved(demande || null);
-        return;
+  const fetchDemandes = async () => {
+    try {
+      const res = await listAllDemandes({ statut: "approuvee,en_attente_paiement" });
+      if (res?.success) {
+        const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut));
+        setDemandes(rows);
+      } else {
+        setDemandes([]);
       }
-
-      try {
-        setDemandeResolving(true);
-        const res = await getDemande(uuid);
-        if (!alive) return;
-        if (res?.success && res?.data) {
-          setDemandeResolved(res.data);
-        } else {
-          setDemandeResolved(demande || null);
-        }
-      } catch {
-        if (!alive) return;
-        setDemandeResolved(demande || null);
-      } finally {
-        if (!alive) return;
-        setDemandeResolving(false);
-      }
-    };
-
-    resolve();
-    return () => {
-      alive = false;
-    };
-  }, [open, demande?.uuid, demande?.demande_uuid, demande?.conditions_paiement]);
-
-  const demandeMontant = useMemo(() => Number(demandeResolved?.montant ?? 0), [demandeResolved?.montant]);
-
-  const conditions = useMemo(() => {
-    const list = Array.isArray(demandeResolved?.conditions_paiement) ? demandeResolved.conditions_paiement : [];
-    return list.slice().sort((a, b) => Number(a?.id ?? 0) - Number(b?.id ?? 0));
-  }, [demandeResolved?.conditions_paiement]);
-
-  const unpaid = useMemo(() => {
-    return conditions.filter((c) => !c?.paiement_id && String(c?.statut || "").toLowerCase() !== "paye");
-  }, [conditions]);
-
-  const paiementMode = useMemo(() => deriveModeFromConditions(conditions), [conditions]);
-  const nextTranche = unpaid?.[0] || null;
-  const remainingTotal = useMemo(() => {
-    return round2(unpaid.reduce((acc, c) => acc + Number(c?.montant_prevu || 0), 0));
-  }, [unpaid]);
-
-  useEffect(() => {
-    if (!open) return;
-    setError("");
-    setSubmitting(false);
-    setForm((p) => ({
-      ...p,
-      type_paiement: "total",
-      montant: remainingTotal ? String(remainingTotal) : (demandeMontant ? String(demandeMontant) : ""),
-      date_paiement: new Date().toISOString().slice(0, 10), // YYYY-MM-DD
-      moyen_paiement: "virement",
-      reference_piece: "",
-      compte_debite: "",
-      commentaire: "",
-      require_docs: true,
-    }));
-    setDocs({ type_document: "preuve_paiement", files: [] });
-    setDocsTypeAutre("");
-  }, [open, demandeMontant, remainingTotal]);
-
-  const isTotal = form.type_paiement === "total";
-  const isPartiel = form.type_paiement === "partiel";
-  const partielAllowed = paiementMode !== "100/100";
-  const expectedAmount = useMemo(() => {
-    if (isTotal) return remainingTotal || demandeMontant;
-    if (isPartiel) return nextTranche?.montant_prevu != null ? Number(nextTranche.montant_prevu) : null;
-    return null;
-  }, [isTotal, isPartiel, remainingTotal, demandeMontant, nextTranche]);
-
-  useEffect(() => {
-    if (!open) return;
-    // Auto-fill montant selon les règles (montant exact attendu)
-    if (expectedAmount != null && expectedAmount !== "") {
-      setForm((p) => ({ ...p, montant: String(expectedAmount) }));
+    } catch (e) {
+      setDemandes([]);
+      emitToast("Erreur chargement demandes", "error");
     }
-  }, [expectedAmount, open]);
+  };
 
-  const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const resolveDemande = async (id) => {
+    if (!id) {
+      setDemandeResolved(null);
+      return;
+    }
+    const d = demandes.find((d) => Number(d.id) === Number(id));
+    setDemandeResolved(d || null);
+  };
+
+  useEffect(() => {
+    if (open) {
+      fetchDemandes();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    resolveDemande(form.demande_id);
+  }, [form.demande_id, demandes]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!defaultDemandeId) return;
+    const nextId = String(defaultDemandeId);
+    setForm((prev) => (String(prev.demande_id) === nextId ? prev : { ...prev, demande_id: nextId }));
+  }, [open, defaultDemandeId]);
+
+  const reset = () => {
+    setForm({
+      demande_id: "",
+      type_paiement: "total",
+      montant: "",
+      moyen_paiement: "",
+    });
+    setError("");
+    setLoading(false);
+    setDemandeResolved(null);
+    autoMoyenRef.current = "";
+    setUploadType("recu");
+    setUploadTypeAutre("");
+    setUploadFiles([]);
+  };
 
   const close = () => {
-    if (submitting) return;
-    onClose?.();
+    if (loading) return;
+    reset();
+    onClose();
   };
 
-  const validate = () => {
-    if (!demandeResolved?.id && !demandeResolved?.demande_id) return "Demande introuvable";
-    if (!form.type_paiement) return "Type paiement obligatoire";
-    if (!form.moyen_paiement) return "Moyen paiement obligatoire";
-
-    const m = Number(form.montant);
-    if (!m || Number.isNaN(m) || m <= 0) return "Montant invalide";
-
-    // Règles conditions paiement
-    if (paiementMode === "100/100" && String(form.type_paiement) === "partiel") {
-      return "Condition 100/100 : paiement en une seule fois";
-    }
-
-    if (expectedAmount != null && !amountsEqual(m, expectedAmount)) {
-      return `Montant attendu = ${expectedAmount}`;
-    }
-
-    if (!form.date_paiement) return "Date paiement obligatoire";
-
-    if (form.require_docs && (!docs.files?.length)) {
-      return "Veuillez joindre au moins un document";
-    }
-
-    if (
-      form.require_docs &&
-      docs.files?.length &&
-      String(docs.type_document).toLowerCase() === "autre" &&
-      !docsTypeAutre.trim()
-    ) {
-      return "Veuillez préciser le type de document (Autre)";
-    }
-
-    return "";
-  };
-
-  const onSubmit = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    if (submitting) return;
-
     setError("");
 
-    const msg = validate();
-    if (msg) return setError(msg);
-
     try {
-      setSubmitting(true);
+      setLoading(true);
 
-      // ✅ 1) Créer paiement (JSON)
-      const payload = {
-        demande_id: demandeResolved?.id ?? demandeResolved?.demande_id,
-        type_paiement: form.type_paiement,
-        montant: String(Number(form.montant)),
-        date_paiement: new Date(form.date_paiement).toISOString(),
-        moyen_paiement: form.moyen_paiement,
-        reference_piece: form.reference_piece?.trim() || null,
-        compte_debite: form.compte_debite?.trim() || null,
-        commentaire: form.commentaire?.trim() || null,
-      };
+      if (!form.demande_id) throw new Error("Sélectionnez une demande");
+      if (!form.type_paiement) throw new Error("Sélectionnez un type de paiement");
+      if (!form.montant) throw new Error("Entrez un montant");
 
-      const res = await createPaiement(payload);
-      if (!res?.success) throw new Error(res?.message || "Création paiement échouée");
+      const m = Number(form.montant);
+      if (!m || Number.isNaN(m) || m <= 0) throw new Error("Montant invalide");
 
-      const paiement = res?.data;
-      const paiementId = paiement?.id;
-
-      if (!paiementId) {
-        throw new Error("Paiement créé mais ID manquant (réponse backend invalide).");
+      const hasUploads = uploadFiles.length > 0;
+      const typeDoc =
+        uploadType === "autre"
+          ? `autre:${String(uploadTypeAutre || "").trim()}`
+          : uploadType;
+      if (hasUploads && uploadType === "autre" && (!uploadTypeAutre || !String(uploadTypeAutre).trim())) {
+        throw new Error("Veuillez préciser le type (Autre)");
       }
 
-      // ✅ 2) Upload documents (API séparée)
-      if (form.require_docs && docs.files?.length) {
-        const typeDocumentToSend =
-          String(docs.type_document).toLowerCase() === "autre"
-            ? `autre:${docsTypeAutre.trim()}`
-            : docs.type_document;
+      const res = await createPaiement({
+        demande_id: Number(form.demande_id),
+        type_paiement: form.type_paiement,
+        montant: Number(form.montant),
+        moyen_paiement: form.moyen_paiement,
+      });
 
+      if (!res?.success) throw new Error(res?.message || "Erreur création paiement");
+
+      if (hasUploads) {
+        const paiementId = res?.data?.id || res?.data?.paiement?.id;
+        if (!paiementId) throw new Error("Paiement créé, mais id introuvable pour upload");
         await uploadManyDocuments({
-          files: docs.files,
-          type_document: typeDocumentToSend,
+          files: uploadFiles,
+          type_document: typeDoc,
           paiement_id: paiementId,
         });
       }
 
-      onCreated?.(paiement);
+      emitToast("Paiement créé avec succès", "success");
+      onCreated?.(res.data);
       close();
     } catch (err) {
       setError(err?.message || "Erreur inconnue");
-      setSubmitting(false);
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (!open) return null;
+  // Calculer les montants en fonction de la demande sélectionnée
+  const demandeMontant = useMemo(
+    () => Number(demandeResolved?.montant_net ?? demandeResolved?.montant ?? 0),
+    [demandeResolved?.montant_net, demandeResolved?.montant]
+  );
 
-  const fieldClass =
-    "w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed";
+  // Calculer les montants restants à payer pour les tranches
+  const unpaid = useMemo(() => {
+    if (!demandeResolved?.conditions_paiement?.length) return [];
+    return (demandeResolved.conditions_paiement || [])
+      .filter((c) => !c.paiement_id) // Non payées
+      .map((c) => ({ ...c, montant_prevu: Number(c.montant_prevu) }))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); // Tri par date
+  }, [demandeResolved?.conditions_paiement]);
+
+  const remainingTotal = useMemo(() => {
+    return round2(unpaid.reduce((acc, c) => acc + Number(c?.montant_prevu || 0), 0));
+  }, [unpaid]);
+
+  const nextTranche = unpaid[0] || null;
+
+  const isTotal = form.type_paiement === "total";
+  const isPartiel = form.type_paiement === "partiel";
+
+  // Auto-remplir le montant selon le type de paiement
+  useEffect(() => {
+    if (!open) return;
+    if (!demandeResolved) {
+      setForm((p) => ({ ...p, montant: "" }));
+      return;
+    }
+
+    const expectedAmount = isTotal
+      ? remainingTotal || demandeMontant
+      : isPartiel
+        ? nextTranche?.montant_prevu != null
+          ? Number(nextTranche.montant_prevu)
+          : null
+        : null;
+
+    if (expectedAmount != null) {
+      // Auto-fill montant selon les règles (montant exact attendu)
+      setForm((p) => ({ ...p, montant: String(expectedAmount) }));
+    }
+  }, [open, isTotal, isPartiel, remainingTotal, demandeMontant, nextTranche]);
+
+  useEffect(() => {
+    if (!demandeResolved) {
+      autoMoyenRef.current = "";
+      return;
+    }
+    const nextDefault = String(demandeResolved?.daf_critere4 || "").trim();
+    if (!nextDefault) return;
+
+    setForm((prev) => {
+      const prevValue = String(prev.moyen_paiement || "");
+      const shouldReplace = !prevValue || prevValue === autoMoyenRef.current;
+      if (!shouldReplace) return prev;
+      return { ...prev, moyen_paiement: nextDefault };
+    });
+
+    autoMoyenRef.current = nextDefault;
+  }, [demandeResolved?.id, demandeResolved?.daf_critere4]);
+
+  const validateMontant = () => {
+    if (!demandeResolved) return null;
+    if (!form.montant) return null;
+
+    const m = Number(form.montant);
+    if (!m || Number.isNaN(m) || m <= 0) return "Montant invalide";
+
+    const expectedAmount = isTotal
+      ? remainingTotal || demandeMontant
+      : isPartiel
+        ? nextTranche?.montant_prevu != null
+          ? Number(nextTranche.montant_prevu)
+          : null
+        : null;
+
+    if (expectedAmount != null && Math.abs(m - expectedAmount) > 0.01) {
+      return `Montant attendu = ${expectedAmount}`;
+    }
+    return null;
+  };
+
+  const errorMsg = validateMontant();
+
+  if (!open) return null;
 
   return (
     <Modal
       isOpen={open}
       onClose={close}
       showCloseButton={false}
-      className="w-full max-w-3xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
+      className="w-full max-w-2xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
     >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Nouveau paiement</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Demande: <span className="font-mono text-xs">{demande?.uuid || demande?.demande_uuid || "-"}</span>
-              {" — "}Montant: {formatMoney(demandeMontant)} FCFA
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={close}
-            disabled={submitting}
-            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            Fermer
-          </button>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Créer un paiement</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Remplissez les détails du paiement.</p>
         </div>
 
-        {paiementMode ? (
-          <div className="mt-3 text-xs text-gray-600 dark:text-gray-300">
-            Conditions: <span className="font-medium">{paiementMode}</span>
-            {unpaid?.length ? (
-              <>
+        <button
+          type="button"
+          disabled={loading}
+          title="Fermer"
+          aria-label="Fermer"
+          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+          onClick={close}
+        >
+          <FiX />
+        </button>
+      </div>
+
+      {error ? (
+        <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </div>
+      ) : null}
+
+      <form onSubmit={submit} className="mt-4 space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Demande</label>
+          <select
+            value={form.demande_id}
+            onChange={(e) => setForm({ ...form, demande_id: e.target.value })}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            disabled={loading}
+          >
+            <option value="">Sélectionnez une demande</option>
+            {demandes.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.motif} ({d.uuid}) - {formatMoney(d.montant_net ?? d.montant)} FCFA
+                </option>
+              ))}
+          </select>
+        </div>
+
+        {demandeResolved ? (
+          <div className="p-3 text-xs text-gray-600 bg-gray-50 rounded-lg dark:bg-gray-900 dark:text-gray-400">
+            <div>Demande: {demandeResolved.motif}</div>
+            <div>
+              {" — "}Montant: {formatMoney(demandeMontant)} FCFA
+            </div>
+            {remainingTotal > 0 ? (
+              <div>
                 {" — "}Restant: <span className="font-medium">{formatMoney(remainingTotal)} FCFA</span>
-                {nextTranche?.montant_prevu != null ? (
-                  <>
-                    {" — "}Prochaine tranche: <span className="font-medium">{formatMoney(nextTranche.montant_prevu)} FCFA</span>
-                  </>
-                ) : null}
-              </>
+              </div>
+            ) : null}
+            {nextTranche?.montant_prevu != null ? (
+              <div>
+                {" — "}Prochaine tranche: <span className="font-medium">{formatMoney(nextTranche.montant_prevu)} FCFA</span>
+              </div>
             ) : null}
           </div>
         ) : null}
 
-        {demandeResolving ? (
-          <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Chargement des conditions de paiement…</div>
-        ) : null}
-
-        {error ? (
-          <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        <form noValidate onSubmit={onSubmit} className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Type paiement">
-              <select
-                value={form.type_paiement}
-                onChange={(e) => setField("type_paiement", e.target.value)}
-                className={fieldClass}
-              >
-                {TYPE_PAIEMENT.filter((t) => (t.value === "partiel" ? partielAllowed : true)).map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Montant">
-              <input
-                value={form.montant}
-                onChange={(e) => setField("montant", e.target.value)}
-                className={fieldClass}
-                disabled={isTotal || isPartiel}
-                placeholder="Ex: 200000"
-              />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Aperçu: {formatMoney(form.montant)} FCFA</p>
-            </Field>
-
-            <Field label="Date paiement">
-              <DatePicker
-                id="paiement-date-paiement"
-                placeholder="YYYY-MM-DD"
-                dateFormat="Y-m-d"
-                defaultDate={form.date_paiement || undefined}
-                onChange={(_, dateStr) => setField("date_paiement", dateStr)}
-              />
-            </Field>
-
-            <Field label="Moyen paiement">
-              <select
-                value={form.moyen_paiement}
-                onChange={(e) => setField("moyen_paiement", e.target.value)}
-                className={fieldClass}
-              >
-                {MOYENS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Référence pièce">
-              <input
-                value={form.reference_piece}
-                onChange={(e) => setField("reference_piece", e.target.value)}
-                className={fieldClass}
-                placeholder="Ex: VIRM-2026-0001"
-              />
-            </Field>
-
-            <Field label="Compte débité">
-              <input
-                value={form.compte_debite}
-                onChange={(e) => setField("compte_debite", e.target.value)}
-                className={fieldClass}
-                placeholder="Ex: BICICI 0102..."
-              />
-            </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type de paiement</label>
+            <select
+              value={form.type_paiement}
+              onChange={(e) => setForm({ ...form, type_paiement: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              disabled={loading}
+            >
+              <option value="total">Total</option>
+              <option value="partiel">Partiel</option>
+            </select>
           </div>
 
-          <Field label="Commentaire">
-            <textarea
-              rows={3}
-              value={form.commentaire}
-              onChange={(e) => setField("commentaire", e.target.value)}
-              className={fieldClass}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Montant</label>
+            <input
+              type="number"
+              step="any"
+              value={form.montant}
+              onChange={(e) => setForm({ ...form, montant: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="0.00"
+              disabled={loading || isTotal || isPartiel}
             />
-          </Field>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Joindre documents ?">
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={form.require_docs}
-                  onChange={(e) => setField("require_docs", e.target.checked)}
-                />
-                require_docs
-              </label>
-            </Field>
-            <div />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Aperçu: {formatMoney(form.montant)} FCFA</p>
+            {errorMsg ? (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{errorMsg}</p>
+            ) : null}
           </div>
 
-          {form.require_docs ? (
-            <div className="p-4 border border-gray-200 rounded-xl dark:border-gray-800">
-              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Documents (preuves)</div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Moyen de paiement</label>
+            <select
+              value={form.moyen_paiement}
+              onChange={(e) => setForm({ ...form, moyen_paiement: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              disabled={loading}
+            >
+              <option value="">Sélectionnez un moyen</option>
+              <option value="Virement">Virement</option>
+              <option value="Chèque">Chèque</option>
+              <option value="OM">OM</option>
+              <option value="Espèces">Espèces</option>
+            </select>
+          </div>
+        </div>
 
-              <div className="grid grid-cols-1 gap-3 mt-3 sm:grid-cols-2">
-                <Field label="Type document">
-                  <select
-                    value={docs.type_document}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setDocs((p) => ({ ...p, type_document: v }));
-                      if (String(v).toLowerCase() !== "autre") setDocsTypeAutre("");
-                    }}
-                    className={fieldClass}
-                  >
-                    <option value="preuve_paiement">preuve_paiement</option>
-                    <option value="recu">recu</option>
-                    <option value="autre">autre</option>
-                  </select>
-                </Field>
+        <div className="p-3 border border-gray-200 rounded-xl dark:border-gray-800">
+          <div className="text-sm font-medium text-gray-800 dark:text-white/90">Pièces jointes</div>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Type</div>
+              <select
+                value={uploadType}
+                onChange={(e) => {
+                  setUploadType(e.target.value);
+                  if (e.target.value !== "autre") setUploadTypeAutre("");
+                }}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                disabled={loading}
+              >
+                <option value="recu">Reçu</option>
+                <option value="facture">Facture</option>
+                <option value="preuve_paiement">Preuve de paiement</option>
+                <option value="autre">Autre</option>
+              </select>
+            </div>
 
-                {String(docs.type_document).toLowerCase() === "autre" ? (
-                  <Field label="Préciser (Autre)">
-                    <input
-                      value={docsTypeAutre}
-                      onChange={(e) => setDocsTypeAutre(e.target.value)}
-                      className={fieldClass}
-                      placeholder="Ex: bordereau, avis de débit..."
-                    />
-                  </Field>
-                ) : null}
-
-                <Field label="Fichiers">
-                  <input
-                    type="file"
-                    multiple
-                    onChange={(e) => setDocs((p) => ({ ...p, files: Array.from(e.target.files || []) }))}
-                    className="w-full text-sm"
-                  />
-                  {docs.files?.length ? (
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{docs.files.length} fichier(s)</p>
-                  ) : null}
-                </Field>
+            {uploadType === "autre" ? (
+              <div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Préciser</div>
+                <input
+                  value={uploadTypeAutre}
+                  onChange={(e) => setUploadTypeAutre(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                  placeholder="Ex: Bordereau"
+                  disabled={loading}
+                />
               </div>
+            ) : null}
+
+            <div className={uploadType === "autre" ? "sm:col-span-1" : "sm:col-span-2"}>
+              <div className="text-xs text-gray-500 dark:text-gray-400">Fichiers</div>
+              <input
+                type="file"
+                multiple
+                onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
+                className="w-full text-sm"
+                disabled={loading}
+              />
+            </div>
+          </div>
+          {uploadFiles.length ? (
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {uploadFiles.length} fichier(s) sélectionné(s)
             </div>
           ) : null}
+        </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={close}
-              disabled={submitting}
-              className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
-            >
-              {submitting ? "Traitement..." : "Enregistrer"}
-            </button>
-          </div>
-        </form>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={close}
+            disabled={loading}
+            title="Annuler"
+            aria-label="Annuler"
+            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <FiX />
+          </button>
+
+          <button
+            type="submit"
+            disabled={loading}
+            title={loading ? "Création..." : "Créer"}
+            aria-label={loading ? "Création..." : "Créer"}
+            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
+          >
+            <FiCheckCircle />
+          </button>
+        </div>
+      </form>
     </Modal>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">{label}</div>
-      {children}
-    </div>
   );
 }

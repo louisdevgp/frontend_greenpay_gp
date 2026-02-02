@@ -1,8 +1,8 @@
 import { api } from "./api";
 
 
-export async function listPaiements() {
-  const res = await api.get("/paiements");
+export async function listPaiements(params = {}) {
+  const res = await api.get("/paiements", { params });
   return res.data; // { success, data: [...] }
 }
 

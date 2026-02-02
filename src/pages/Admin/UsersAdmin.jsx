@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";

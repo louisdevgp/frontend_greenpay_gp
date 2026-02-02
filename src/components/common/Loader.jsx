@@ -11,7 +11,7 @@ export default function Loader({
     return (
       <span className="inline-flex items-center gap-2">
         <span
-          className="animate-spin rounded-full border-2 border-gray-300 border-t-gray-900 dark:border-gray-700 dark:border-t-white"
+          className="animate-spin rounded-full border-2 border-gray-300 border-t-gray-700 dark:border-gray-600 dark:border-t-blue-500"
           style={{ width: px, height: px }}
         />
         {label ? <span className="text-sm">{label}</span> : null}
@@ -23,7 +23,7 @@ export default function Loader({
     <div className="flex items-center justify-center w-full py-10">
       <div className="flex items-center gap-3">
         <span
-          className="animate-spin rounded-full border-2 border-gray-300 border-t-gray-900 dark:border-gray-700 dark:border-t-white"
+          className="animate-spin rounded-full border-2 border-gray-300 border-t-gray-700 dark:border-gray-600 dark:border-t-blue-500"
           style={{ width: px, height: px }}
         />
         <span className="text-sm text-gray-600 dark:text-gray-300">{label}</span>

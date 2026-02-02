@@ -43,13 +43,12 @@ export async function listDocuments(params = {}) {
 }
 
 // POST /documents/upload (multipart)
-export async function uploadDocument({ file, demande_id, paiement_id, reception_id, bon_commande_id, type_document }) {
+export async function uploadDocument({ file, demande_id, paiement_id, reception_id, type_document }) {
   const formData = new FormData();
   formData.append("files", file);
   if (demande_id != null) formData.append("demande_id", String(demande_id));
   if (paiement_id != null) formData.append("paiement_id", String(paiement_id));
   if (reception_id != null) formData.append("reception_id", String(reception_id));
-  if (bon_commande_id != null) formData.append("bon_commande_id", String(bon_commande_id));
   formData.append("type_document", type_document);
 
   const res = await api.post("/documents/upload", formData); // ⚠️ adapte si ton endpoint diffère

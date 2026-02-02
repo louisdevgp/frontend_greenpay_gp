@@ -1,206 +1,433 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { FiDownload, FiEye, FiFilePlus, FiRefreshCw } from "react-icons/fi";
 import { listReceptions } from "../../services/receptions.service";
+import { listAllDemandes } from "../../services/demandes.services";
 import Pagination from "../../components/common/Pagination";
-import { clearPersistedState, loadPersistedState, savePersistedState } from "../../utils/persistedFilters";
-import FullscreenLoader from "../../components/common/FullScreenLoader";
-import DatePicker from "../../components/form/date-picker";
+import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
+import DatePicker from "../../components/form/date-picker";
+import { useAuth } from "../../context/AuthContext";
+import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
+import CreateReceptionModal from "./CreateReceptionModal";
+import { downloadFile } from "../../utils/downloadFile";
 
-function EyeIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
+function formatDate(input) {
+  if (!input) return "";
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
 }
 
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
-function formatDate(iso) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return new Intl.DateTimeFormat("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+function formatPhase(value) {
+  const v = String(value || "").trim().toUpperCase();
+  if (v === "AVANT_PAIEMENT") return "Avant paiement";
+  if (v === "APRES_PAIEMENT") return "Après paiement";
+  return "-";
 }
 
-const LS_KEY = "filters:receptions:list";
+const initialState = {
+  filters: { reference: "", dateStart: "", dateEnd: "" },
+  page: 1,
+  pageSize: 10,
+};
 
-export default function ReceptionsList() {
+export default function ReceptionsList({ mode = "all" }) {
+  const { user } = useAuth();
+  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const delegatedRoles = (user?.agent?.delegations || [])
+    .map((d) => String(d?.role_name || "").toUpperCase())
+    .filter(Boolean);
+  const effectiveRoles = new Set([...roles, ...delegatedRoles]);
+  const modeKey = String(mode || "all").trim().toLowerCase();
+
+  const storageKey = useMemo(() => {
+    if (modeKey === "pending") return "filters:receptions:pending";
+    if (modeKey === "done") return "filters:receptions:done";
+    return "filters:receptions:list";
+  }, [modeKey]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [rows, setRows] = useState([]);
+  const [data, setData] = useState([]);
+  const [filtered, setFiltered] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedDemande, setSelectedDemande] = useState(null);
 
-  const [filters, setFilters] = useState(() =>
-    loadPersistedState(LS_KEY, { paiement_uuid: "", receveur: "", dateStart: "", dateEnd: "" })
-  );
+  const [state, setState] = useState(() => {
+    const saved = loadPersistedState(storageKey);
+    return saved ? { ...initialState, ...saved } : initialState;
+  });
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  useEffect(() => {
+    const saved = loadPersistedState(storageKey);
+    setState(saved ? { ...initialState, ...saved } : initialState);
+  }, [storageKey]);
 
-  const fetchData = async () => {
+  const isDirectorOnlyView = effectiveRoles.has("DIRECTEUR") && !effectiveRoles.has("DAF");
+  const isDoneForDaf = (r) => !!r?.visa_daf_id;
+  const isPendingForDaf = (r) => !!r?.visa_directeur_id && !r?.visa_daf_id;
+  const showDemandes = modeKey === "pending" && isDirectorOnlyView;
+
+  const fetch = async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await listReceptions();
-      if (!res?.success) throw new Error(res?.message || "Erreur chargement réceptions");
-      setRows(res.data || []);
+      if (showDemandes) {
+        const params = {
+          page: state.page,
+          pageSize: state.pageSize,
+          statut: "approuvee,en_attente_paiement,paye",
+        };
+
+        const res = await listAllDemandes(params);
+        if (!res?.success) throw new Error(res?.message || "Erreur chargement demandes");
+        const rows = res.data || [];
+        setData(rows);
+        setFiltered(rows);
+      } else {
+        const params = {
+          page: state.page,
+          pageSize: state.pageSize,
+          ...(state.filters.reference ? { reference: state.filters.reference } : {}),
+          ...(state.filters.dateStart ? { date_debut: state.filters.dateStart } : {}),
+          ...(state.filters.dateEnd ? { date_fin: state.filters.dateEnd } : {}),
+        };
+
+        const res = await listReceptions(params);
+        if (!res?.success) throw new Error(res?.message || "Erreur chargement réceptions");
+        const rows = res.data || [];
+        const scoped =
+          modeKey === "pending"
+            ? rows.filter((r) => isPendingForDaf(r))
+            : modeKey === "done"
+              ? (isDirectorOnlyView ? rows : rows.filter((r) => isDoneForDaf(r)))
+              : rows;
+        setData(scoped);
+        setFiltered(scoped);
+      }
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
+      setData([]);
+      setFiltered([]);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
-  useEffect(() => { savePersistedState(LS_KEY, filters); setPage(1); }, [filters]);
+  useEffect(() => {
+    fetch();
+  }, [state.page, state.pageSize, state.filters, modeKey, showDemandes]);
 
-  const filtered = useMemo(() => {
-    return (rows || []).filter((r) => {
-      const paiementUuid = String(r?.paiements?.uuid || r?.paiement_uuid || "");
-      const receveur = String(r?.receveur_nom || r?.receveur || "");
-      const createdAt = r?.date_reception || r?.created_at;
+  useEffect(() => {
+    if (state.filters.reference || state.filters.dateStart || state.filters.dateEnd) {
+      const filtered = (data || []).filter((row) => {
+        if (state.filters.reference) {
+          const needle = String(state.filters.reference).toLowerCase();
+          if (showDemandes) {
+            const motif = String(row.motif || "").toLowerCase();
+            const beneficiaire = String(row.beneficiaire || "").toLowerCase();
+            if (!motif.includes(needle) && !beneficiaire.includes(needle)) return false;
+          } else {
+            if (!String(row.reference_facture || "").toLowerCase().includes(needle)) return false;
+          }
+        }
 
-      const okP = !filters.paiement_uuid || paiementUuid.toLowerCase().includes(filters.paiement_uuid.toLowerCase());
-      const okR = !filters.receveur || receveur.toLowerCase().includes(filters.receveur.toLowerCase());
+        if (state.filters.dateStart || state.filters.dateEnd) {
+          const targetDate = showDemandes ? row.created_at : row.date_reception;
+          if (state.filters.dateStart && new Date(targetDate) < new Date(parseDateOnlyStart(state.filters.dateStart))) return false;
+          if (state.filters.dateEnd && new Date(targetDate) > new Date(parseDateOnlyEnd(state.filters.dateEnd))) return false;
+        }
+        return true;
+      });
+      setFiltered(filtered);
+    } else {
+      setFiltered(data || []);
+    }
+  }, [data, state.filters, showDemandes]);
 
-      const d = createdAt ? new Date(createdAt) : null;
-      const start = parseDateOnlyStart(filters.dateStart);
-      const end = parseDateOnlyEnd(filters.dateEnd);
-      const okStart = !start || (d && d >= start);
-      const okEnd = !end || (d && d <= end);
+  const resetFilters = () => {
+    const newState = { ...initialState, page: 1 };
+    setState(newState);
+    savePersistedState(storageKey, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+  };
 
-      return okP && okR && okStart && okEnd;
-    });
-  }, [rows, filters]);
+  const updateFilter = (key, value) => {
+    const newFilters = { ...state.filters, [key]: value };
+    const newState = { ...state, filters: newFilters, page: 1 }; // Reset page when filter changes
+    setState(newState);
+    savePersistedState(storageKey, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
+  };
+
+  const updatePagination = (page, pageSize) => {
+    const newState = { ...state, page, pageSize };
+    setState(newState);
+    savePersistedState(storageKey, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+  };
 
   const total = filtered.length;
-  const paged = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, page, pageSize]);
+
+  const canViewDetails =
+    effectiveRoles.has("ADMIN") ||
+    effectiveRoles.has("DAF") ||
+    effectiveRoles.has("DGA") ||
+    effectiveRoles.has("DG") ||
+    effectiveRoles.has("DIRECTEUR");
+  const title =
+    modeKey === "pending" ? "Réceptions en attente"
+      : modeKey === "done" ? "Réceptions effectuées"
+        : "Réceptions";
+  const emptyMessage =
+    showDemandes ? "Aucune demande éligible."
+      : modeKey === "pending" ? "Aucune réception en attente."
+      : modeKey === "done" ? "Aucune réception effectuée."
+        : "Aucune réception trouvée.";
+  const referenceLabel = showDemandes ? "Motif / Bénéficiaire" : "Réf. facture";
+  const openCreate = (demande) => {
+    setSelectedDemande(demande || null);
+    setCreateOpen(true);
+  };
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setSelectedDemande(null);
+  };
 
   return (
     <div className="space-y-4">
-      <FullscreenLoader show={loading} label="Chargement des réceptions..." />
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">{title}</h1>
+        <button
+          onClick={() => window.location.reload()}
+          title="Actualiser"
+          aria-label="Actualiser"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+        >
+          <FiRefreshCw />
+        </button>
+      </div>
 
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Réceptions</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Réceptions créées à partir des paiements.</p>
+      {error ? (
+        <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">{referenceLabel}</label>
+            <input
+              type="text"
+              value={state.filters.reference}
+              onChange={(e) => updateFilter("reference", e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Recherche..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Du</label>
+            <DatePicker
+              value={state.filters.dateStart ? new Date(state.filters.dateStart) : null}
+              onChange={(d) => updateFilter("dateStart", d ? formatDate(d) : "")}
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Au</label>
+            <DatePicker
+              value={state.filters.dateEnd ? new Date(state.filters.dateEnd) : null}
+              onChange={(d) => updateFilter("dateEnd", d ? formatDate(d) : "")}
+              className="w-full"
+            />
+          </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="mt-3 flex gap-2">
           <button
-            type="button"
-            onClick={fetchData}
-            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+            onClick={resetFilters}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Rafraîchir
+            Réinitialiser
           </button>
           <button
-            type="button"
-            onClick={() => { clearPersistedState(LS_KEY); setFilters({ paiement_uuid: "", receveur: "", dateStart: "", dateEnd: "" }); }}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            onClick={clearPersistedState.bind(null, storageKey)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Reset filtres
+            Effacer filtres
           </button>
         </div>
       </div>
 
-      {/* filtres */}
-      <div className="grid grid-cols-1 gap-3 p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800 sm:grid-cols-4">
-        <input
-          value={filters.paiement_uuid}
-          onChange={(e) => setFilters((p) => ({ ...p, paiement_uuid: e.target.value }))}
-          placeholder="Filtrer paiement uuid"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <input
-          value={filters.receveur}
-          onChange={(e) => setFilters((p) => ({ ...p, receveur: e.target.value }))}
-          placeholder="Filtrer receveur"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-          <DatePicker
-            id="receptions-start"
-            placeholder="Date début"
-            defaultDate={filters.dateStart || undefined}
-            onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateStart: dateStr }))}
-          />
-          <DatePicker
-            id="receptions-end"
-            placeholder="Date fin"
-            defaultDate={filters.dateEnd || undefined}
-            onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateEnd: dateStr }))}
-          />
-      </div>
-
-      {/* table */}
-      <div className="overflow-hidden bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left bg-gray-50 dark:bg-gray-950">
-              <tr>
-                <th className="px-4 py-3">UUID</th>
-                <th className="px-4 py-3">Paiement</th>
-                <th className="px-4 py-3">Receveur</th>
-                <th className="px-4 py-3">Conforme</th>
-                <th className="px-4 py-3">Montant</th>
-                <th className="px-4 py-3">Réf. facture</th>
-                <th className="px-4 py-3">Date réception</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {error ? (
-                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={8}>{error}</td></tr>
-              ) : paged.length === 0 ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={8}>Aucune réception.</td></tr>
-              ) : (
-                paged.map((r) => (
-                  <tr key={r.id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-4 py-3 font-mono text-xs">{r.uuid}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{r?.paiements?.uuid || r?.paiement_uuid || "-"}</td>
-                    <td className="px-4 py-3">{r.receveur_nom || "-"}</td>
-                    <td className="px-4 py-3">{r.conforme === false ? "Non" : "Oui"}</td>
-                    <td className="px-4 py-3">{r.montant ? `${formatMoney(r.montant)} FCFA` : "-"}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{r.reference_facture || "-"}</td>
-                    <td className="px-4 py-3">{formatDate(r.date_reception || r.created_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        to={`/receptions/${r.uuid}`}
-                        className="inline-flex p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                        title="Voir"
-                      >
-                        <EyeIcon />
-                      </Link>
-                    </td>
+      {loading ? (
+        <div className="p-4 text-center">Chargement...</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">{emptyMessage}</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            {showDemandes ? (
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Motif</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                  {filtered.map((demande) => (
+                    <tr key={demande.id}>
+                      <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{demande.uuid}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`px-2 py-1 text-xs rounded ${demandeStatusBadgeClass(demande.statut)}`}>
+                          {labelDemandeStatut(demande.statut)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire || "-"}</td>
+                      <td className="px-4 py-3 text-sm">{formatMoney(demande.montant_net ?? demande.montant)} FCFA</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openCreate(demande)}
+                            title="Créer réception"
+                            aria-label="Créer réception"
+                            className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-600 text-white hover:opacity-90"
+                          >
+                            <FiFilePlus />
+                          </button>
+                          <Link
+                            to={`/demandes/${demande.uuid}`}
+                            title="Voir la demande"
+                            aria-label="Voir la demande"
+                            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                          >
+                            <FiEye />
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Receveur</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Date réception</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Phase</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Réf. facture</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Conforme</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Visa Directeur</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Visa DAF</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                  {filtered.map((reception) => (
+                    <tr key={reception.id}>
+                      <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{reception.uuid}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{reception.receveur_nom}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(reception.date_reception)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatPhase(reception.phase)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{reception.reference_facture || "-"}</td>
+                      <td className="px-4 py-3 text-sm">{reception.montant ? `${formatMoney(reception.montant)} FCFA` : "-"}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`px-2 py-1 text-xs rounded ${
+                          reception.conforme
+                            ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
+                            : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200"
+                        }`}>
+                          {reception.conforme ? "Oui" : "Non"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {reception.visa_directeur_id ? (
+                          <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
+                            Oui
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
+                            Non
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {reception.visa_daf_id ? (
+                          <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
+                            Oui
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
+                            Non
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex items-center gap-2">
+                          {modeKey === "done" && reception.visa_daf_id && canViewDetails ? (
+                            <button
+                              type="button"
+                              onClick={() => downloadFile(`/receptions/${reception.uuid}/pdf`, `reception_${reception.uuid}.pdf`)}
+                              title="Télécharger PDF"
+                              aria-label="Télécharger PDF"
+                              className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+                            >
+                              <FiDownload />
+                            </button>
+                          ) : null}
+                          {canViewDetails ? (
+                            <Link
+                              to={`/receptions/${reception.uuid}`}
+                              title="Voir"
+                              aria-label="Voir"
+                              className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                            >
+                              <FiEye />
+                            </Link>
+                          ) : (
+                            "-"
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
 
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
           <Pagination
-            page={page}
-            pageSize={pageSize}
+            page={state.page}
+            pageSize={state.pageSize}
             total={total}
-            onPageChange={setPage}
-            onPageSizeChange={(s) => {
-              setPageSize(s);
-              setPage(1);
-            }}
+            onPageChange={(p) => updatePagination(p, state.pageSize)}
+            onPageSizeChange={(size) => updatePagination(1, size)}
           />
-        </div>
-      </div>
+          {showDemandes ? (
+            <CreateReceptionModal
+              open={createOpen}
+              demande={selectedDemande}
+              onClose={closeCreate}
+              onCreated={() => {
+                fetch();
+              }}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

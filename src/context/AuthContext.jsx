@@ -23,7 +23,10 @@ import { clearAuth, getAuth, login as apiLogin, me as apiMe, setAuth } from "../
  *  logout: () => void,
  *  refreshMe: () => Promise<any>,
  *  hasRole: (roleName: string) => boolean,
- *  hasAnyRole: (roleList?: string[]) => boolean
+ *  hasAnyRole: (roleList?: string[]) => boolean,
+ *  permissions: string[],
+ *  hasPermission: (code: string) => boolean,
+ *  hasAnyPermission: (codes?: string[]) => boolean
  * }} AuthContextValue
  */
 
@@ -36,6 +39,7 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !!auth?.accessToken;
   const user = auth?.user || null;
   const roles = user?.roles || [];
+  const permissions = user?.permissions || [];
 
   // 🔄 Au chargement: si token existe → /me pour valider et refresh user
   useEffect(() => {
@@ -104,6 +108,19 @@ export function AuthProvider({ children }) {
     setAuth(next);
     setAuthState(next);
 
+    // refresh user from /users/me (adds delegatedRoles + permissions)
+    try {
+      const meRes = await apiMe();
+      if (meRes?.success && meRes?.data) {
+        const refreshed = { ...next, user: meRes.data };
+        setAuth(refreshed);
+        setAuthState(refreshed);
+        return refreshed;
+      }
+    } catch {
+      // ignore: keep login payload
+    }
+
     return next;
   };
 
@@ -126,6 +143,9 @@ export function AuthProvider({ children }) {
   const hasRole = (roleName) => roles.includes(roleName);
   const hasAnyRole = (roleList = []) => roleList.some((r) => roles.includes(r));
 
+  const hasPermission = (code) => permissions.includes(code);
+  const hasAnyPermission = (codes = []) => codes.some((c) => permissions.includes(c));
+
   const value = useMemo(
     () => ({
       loading,
@@ -138,8 +158,11 @@ export function AuthProvider({ children }) {
       refreshMe,
       hasRole,
       hasAnyRole,
+      permissions,
+      hasPermission,
+      hasAnyPermission,
     }),
-    [loading, isAuthenticated, auth, user, roles]
+    [loading, isAuthenticated, auth, user, roles, permissions]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

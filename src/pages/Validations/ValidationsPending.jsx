@@ -1,296 +1,285 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { FiCheckCircle, FiCornerUpLeft, FiEye, FiRefreshCw, FiXCircle } from "react-icons/fi";
 import { listValidationsPending } from "../../services/validations.service";
 import ValidationActionModal from "./ValidationActionModal";
 import Pagination from "../../components/common/Pagination";
-import DatePicker from "../../components/form/date-picker";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
-import { labelDemandeStatut } from "../../utils/statusLabels";
-import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
+import { labelValidationStepStatus } from "../../utils/statusLabels";
+import { useAuth } from "../../context/AuthContext";
+import { agentDisplayName } from "../../utils/validationActors";
+import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 
 const STORAGE_KEY = "filters:validations:pending";
 
-function EyeIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-function CheckIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function XIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
-function formatDate(iso) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return new Intl.DateTimeFormat("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-}
 function pickDemande(v) {
-  return v?.demande || v?.demandes_paiement || v?.demande_paiement || v?.demandesPaiement || null;
+  if (!v) return null;
+  return v.demande || v.demandes_paiement || v.demande_paiement || v.demandesPaiement || null;
 }
 
 const initialState = {
-  filters: { statut: "", beneficiaire: "", dateStart: "", dateEnd: "" },
+  filters: { statut: "", beneficiaire: "" },
   page: 1,
   pageSize: 10,
 };
 
 export default function ValidationsPending() {
-  const persisted = useMemo(() => loadPersistedState(STORAGE_KEY, initialState), []);
-  const [filters, setFilters] = useState(persisted.filters);
-  const [page, setPage] = useState(persisted.page);
-  const [pageSize, setPageSize] = useState(persisted.pageSize);
+  const { user } = useAuth();
+  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [rows, setRows] = useState([]);
+  const [data, setData] = useState([]);
+  const [filtered, setFiltered] = useState([]);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState("approve");
-  const [selected, setSelected] = useState(null);
+  const [state, setState] = useState(() => {
+    const saved = loadPersistedState(STORAGE_KEY);
+    return saved ? { ...initialState, ...saved } : initialState;
+  });
 
-  useEffect(() => {
-    savePersistedState(STORAGE_KEY, { filters, page, pageSize });
-  }, [filters, page, pageSize]);
+  const [modal, setModal] = useState({ open: false, mode: "approve", item: null });
 
-  const fetchData = async () => {
+  const fetch = async () => {
     setLoading(true);
     setError("");
     try {
       const res = await listValidationsPending();
       if (!res?.success) throw new Error(res?.message || "Erreur chargement validations");
-      setRows(res.data || []);
+      setData(res.data || []);
+      setFiltered(res.data || []);
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
+      setData([]);
+      setFiltered([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    fetch();
   }, []);
 
-  const filtered = useMemo(() => {
-    return (rows || []).filter((v) => {
-      const d = pickDemande(v);
-      const statut = String(d?.statut || v?.statut || "");
-      const benef = String(d?.beneficiaire || "");
-      const createdAt = d?.created_at || v?.created_at;
-
-      const okStatut = !filters.statut || statut.toLowerCase().includes(filters.statut.toLowerCase());
-      const okBenef = !filters.beneficiaire || benef.toLowerCase().includes(filters.beneficiaire.toLowerCase());
-
-      const created = createdAt ? new Date(createdAt) : null;
-      const start = parseDateOnlyStart(filters.dateStart);
-      const end = parseDateOnlyEnd(filters.dateEnd);
-
-      const okStart = !start || (created && created >= start);
-      const okEnd = !end || (created && created <= end);
-
-      return okStatut && okBenef && okStart && okEnd;
-    });
-  }, [rows, filters]);
-
   useEffect(() => {
-    setPage(1);
-  }, [filters.statut, filters.beneficiaire, filters.dateStart, filters.dateEnd]);
-
-  const total = filtered.length;
-  const paginated = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, page, pageSize]);
-
-  const openAction = (mode, item) => {
-    setModalMode(mode);
-    setSelected(item);
-    setModalOpen(true);
-  };
+    if (state.filters.statut || state.filters.beneficiaire) {
+      const filtered = (data || []).filter((v) => {
+        const d = pickDemande(v);
+        if (state.filters.statut && String(v?.status || "").toLowerCase() !== String(state.filters.statut).toLowerCase()) return false;
+        if (state.filters.beneficiaire && !String(d?.beneficiaire || "").toLowerCase().includes(String(state.filters.beneficiaire).toLowerCase())) return false;
+        return true;
+      });
+      setFiltered(filtered);
+    } else {
+      setFiltered(data || []);
+    }
+  }, [data, state.filters]);
 
   const resetFilters = () => {
-    setFilters(initialState.filters);
-    setPage(1);
-    setPageSize(initialState.pageSize);
-    clearPersistedState(STORAGE_KEY);
+    const newState = { ...initialState, page: 1 };
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
+
+  const updateFilter = (key, value) => {
+    // Gérer à la fois les événements DOM et les valeurs directes
+    const actualValue = typeof value === 'object' && value?.target ? value.target.value : value;
+    const newFilters = { ...state.filters, [key]: actualValue };
+    const newState = { ...state, filters: newFilters, page: 1 }; // Reset page when filter changes
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
+  };
+
+  const updatePagination = (page, pageSize) => {
+    const newState = { ...state, page, pageSize };
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+  };
+
+  const openModal = (mode, item) => {
+    setModal({ open: true, mode, item });
+  };
+
+  const closeModal = () => {
+    setModal({ open: false, mode: "approve", item: null });
+    fetch(); // Refresh after action
+  };
+
+  const total = filtered.length;
+
+  const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Validations en attente</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Valider ou rejeter les demandes.</p>
+      <ValidationActionModal
+        open={modal.open}
+        mode={modal.mode}
+        item={modal.item}
+        onClose={() => setModal({ open: false, mode: "approve", item: null })}
+        onDone={closeModal}
+      />
+
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Validations en attente</h1>
+        <button
+          onClick={() => window.location.reload()}
+          title="Actualiser"
+          aria-label="Actualiser"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+        >
+          <FiRefreshCw />
+        </button>
+      </div>
+
+      {error ? (
+        <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Statut</label>
+            <select
+              value={state.filters.statut}
+              onChange={(e) => updateFilter("statut", e)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              <option value="">Tous</option>
+              <option value="en_attente">En attente</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Bénéficiaire</label>
+            <input
+              type="text"
+              value={state.filters.beneficiaire}
+              onChange={(e) => updateFilter("beneficiaire", e)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Recherche..."
+            />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="mt-3 flex gap-2">
           <button
-            type="button"
-            onClick={fetchData}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
-          >
-            Rafraîchir
-          </button>
-          <button
-            type="button"
             onClick={resetFilters}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Reset filtres
+            Réinitialiser
+          </button>
+          <button
+            onClick={clearPersistedState.bind(null, STORAGE_KEY)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+          >
+            Effacer filtres
           </button>
         </div>
       </div>
 
-      {/* filtres */}
-      <div className="grid grid-cols-1 gap-3 p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800 sm:grid-cols-4">
-        <input
-          value={filters.beneficiaire}
-          onChange={(e) => setFilters((p) => ({ ...p, beneficiaire: e.target.value }))}
-          placeholder="Filtrer bénéficiaire"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <input
-          value={filters.statut}
-          onChange={(e) => setFilters((p) => ({ ...p, statut: e.target.value }))}
-          placeholder="Filtrer statut"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <DatePicker
-          id="validations-pending-start"
-          placeholder="Date début"
-          defaultDate={filters.dateStart || undefined}
-          onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateStart: dateStr }))}
-        />
-        <DatePicker
-          id="validations-pending-end"
-          placeholder="Date fin"
-          defaultDate={filters.dateEnd || undefined}
-          onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateEnd: dateStr }))}
-        />
-      </div>
-
-      {/* table */}
-      <div className="overflow-hidden bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left bg-gray-50 dark:bg-gray-950">
-              <tr>
-                <th className="px-4 py-3">Demande</th>
-                <th className="px-4 py-3">Bénéficiaire</th>
-                <th className="px-4 py-3">Montant</th>
-                <th className="px-4 py-3">Statut</th>
-                <th className="px-4 py-3">Créée</th>
-                <th className="px-4 py-3">Commentaire</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {loading ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Chargement...</td></tr>
-              ) : error ? (
-                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={7}>{error}</td></tr>
-              ) : paginated.length === 0 ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Aucune validation en attente.</td></tr>
-              ) : (
-                paginated.map((v) => {
-                  const d = pickDemande(v);
-                  const validationUuid = v?.uuid;
-                  const demandeUuid = d?.uuid || v?.demande_uuid || v?.demandeUuid;
-                  const commentaire = String(v?.commentaire ?? "").trim();
-                  const commentairePreview = commentaire.length > 80 ? `${commentaire.slice(0, 80)}…` : commentaire;
-
+      {loading ? (
+        <div className="p-4 text-center">Chargement...</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune validation en attente.</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Rôle</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Demande</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Demandeur</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                {filtered.map((validation) => {
+                  const demande = pickDemande(validation);
                   return (
-                    <tr key={v.id} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-4 py-3 font-mono text-xs">{demandeUuid || "-"}</td>
-                      <td className="px-4 py-3">{d?.beneficiaire || "-"}</td>
-                      <td className="px-4 py-3">{formatMoney(d?.montant)} FCFA</td>
-                      <td className="px-4 py-3">{labelDemandeStatut(d?.statut || v?.statut)}</td>
-                      <td className="px-4 py-3">{formatDate(d?.created_at || v?.created_at)}</td>
-                      <td className="px-4 py-3">
-                        <div className="max-w-[280px] truncate" title={commentaire || ""}>
-                          {commentairePreview || "-"}
-                        </div>
+                    <tr key={validation.id}>
+                      <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{validation?.uuid || "-"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{validation?.role_name || "-"}</td>
+                      <td className="px-4 py-3 text-sm">
+                        {demande ? (
+                          <Link to={`/demandes/${demande.uuid}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                            {demande.motif?.substring(0, 30) + (demande.motif?.length > 30 ? "..." : "")}
+                          </Link>
+                        ) : (
+                          "-"
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          {validationUuid ? (
-                            <Link
-                              to={`/validations/uuid/${validationUuid}`}
-                              className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                              title="Voir"
-                            >
-                              <EyeIcon />
-                            </Link>
-                          ) : null}
-
-                          <button
-                            type="button"
-                            onClick={() => openAction("approve", v)}
-                            className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                            title="Valider"
+                      <td className="px-4 py-3">{demande ? `${formatMoney(demande.montant_net ?? demande.montant)} FCFA` : "-"}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className={`px-2 py-1 text-xs rounded ${
+                          validation.status === "en_attente"
+                            ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200"
+                            : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                        }`}>
+                          {labelValidationStepStatus(validation.status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                        {agentDisplayName(demande?.agents_demandes_paiement_demandeur_idToagents)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(validation.created_at)}</td>
+                      <td className="px-4 py-3 text-sm space-x-2">
+                        <button
+                          onClick={() => openModal("approve", validation)}
+                          title="Valider"
+                          aria-label="Valider"
+                          className="inline-flex items-center justify-center p-2 rounded bg-green-600 text-white hover:opacity-90"
+                        >
+                          <FiCheckCircle />
+                        </button>
+                        <button
+                          onClick={() => openModal("reject", validation)}
+                          title="Rejeter"
+                          aria-label="Rejeter"
+                          className="inline-flex items-center justify-center p-2 rounded bg-red-600 text-white hover:opacity-90"
+                        >
+                          <FiXCircle />
+                        </button>
+                        <button
+                          onClick={() => openModal("return", validation)}
+                          title="Retourner"
+                          aria-label="Retourner"
+                          className="inline-flex items-center justify-center p-2 rounded bg-amber-600 text-white hover:opacity-90"
+                        >
+                          <FiCornerUpLeft />
+                        </button>
+                        {canViewDetails ? (
+                          <Link
+                            to={`/validations/${validation.uuid}`}
+                            title="Voir"
+                            aria-label="Voir"
+                            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
                           >
-                            <CheckIcon />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => openAction("reject", v)}
-                            className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                            title="Rejeter"
-                          >
-                            <XIcon />
-                          </button>
-                        </div>
+                            <FiEye />
+                          </Link>
+                        ) : null}
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                })}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
           <Pagination
-            page={page}
-            pageSize={pageSize}
+            page={state.page}
+            pageSize={state.pageSize}
             total={total}
-            onPageChange={setPage}
-            onPageSizeChange={(s) => {
-              setPageSize(s);
-              setPage(1);
-            }}
+            onPageChange={(p) => updatePagination(p, state.pageSize)}
+            onPageSizeChange={(size) => updatePagination(1, size)}
           />
-        </div>
-      </div>
-
-      <ValidationActionModal
-        open={modalOpen}
-        mode={modalMode}
-        item={selected}
-        onClose={() => setModalOpen(false)}
-        onDone={fetchData}
-      />
+        </>
+      )}
     </div>
   );
 }

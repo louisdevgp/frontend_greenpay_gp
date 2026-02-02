@@ -1,62 +1,37 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { getDemande } from "../../services/demandes.services";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
-import CreatePaiementModal from "../Paiements/CreatePaiementModal";
+import { FiArrowLeft, FiDownload, FiEdit2, FiEye, FiRefreshCw, FiUpload } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
-import { createBonCommande } from "../../services/bonsCommande.service";
 import { emitToast } from "../../services/toastBus";
 import { downloadFile } from "../../utils/downloadFile";
-import { labelDemandeStatut, labelValidationStepStatus } from "../../utils/statusLabels";
-import { labelBonCommandeStatut } from "../../utils/statusLabels";
+import { labelDemandeStatut, labelValidationStepStatus, demandeStatusBadgeClass } from "../../utils/statusLabels";
+import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { agentDisplayName, validationActorLabel } from "../../utils/validationActors";
 
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
-function formatDateTime(iso) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return new Intl.DateTimeFormat("fr-FR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(d);
+const DAF_CRITERE4_LABEL = "Moyen de paiement";
+
+function parseBooleanLike(value) {
+  if (value === true || value === false) return value;
+  if (typeof value === "number") return value ? true : false;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (!v) return null;
+    if (["true", "1", "oui", "yes"].includes(v)) return true;
+    if (["false", "0", "non", "no"].includes(v)) return false;
+  }
+  return null;
 }
 
-function StatusBadge({ status }) {
-  const v = String(status || "").toLowerCase();
-  const cls =
-    v === "valide"
-      ? "bg-emerald-600 text-white"
-      : v === "en_attente"
-        ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900"
-        : v === "rejete" || v === "rejetee" || v === "rejeté"
-          ? "bg-red-600 text-white"
-          : "bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-200";
-  return (
-    <span className={`inline-flex items-center px-2 py-1 text-xs rounded-lg ${cls}`}>{labelValidationStepStatus(status)}</span>
-  );
-}
-
-function labelPaiementMode(mode) {
-  const v = String(mode || "").toUpperCase().replaceAll(" ", "");
-  if (v === "70/30" || v === "50/50" || v === "100/100") return v;
-  return v ? v : "-";
-}
-
-function TrancheBadge({ statut }) {
-  const v = String(statut || "").toLowerCase();
-  const paid = v === "paye" || v === "payee" || v === "payé" || v === "payée";
-  const cls = paid
-    ? "bg-emerald-600 text-white"
-    : "bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-200";
-  return <span className={`inline-flex items-center px-2 py-1 text-xs rounded-lg ${cls}`}>{paid ? "Payée" : "Prévue"}</span>;
+function formatDafCritere4(value, fallbackLabel) {
+  const boolLike = parseBooleanLike(value);
+  if (boolLike === true) return { label: fallbackLabel, value: "Oui" };
+  if (boolLike === false) return { label: fallbackLabel, value: "Non" };
+  const str = value == null ? "" : String(value).trim();
+  if (!str) return { label: fallbackLabel, value: "-" };
+  return { label: fallbackLabel, value: str };
 }
 
 export default function DemandeDetail() {
@@ -64,122 +39,21 @@ export default function DemandeDetail() {
   const nav = useNavigate();
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-  const userAgentId = user?.agent?.id != null ? Number(user.agent.id) : null;
-
-  const canPayRole = roles.includes("DAF") || roles.includes("COMPTABLE") || roles.includes("ADMIN");
-  const canDownloadPdfRole =
-    roles.includes("DEMANDEUR") ||
-    roles.includes("DIRECTEUR") ||
-    roles.includes("DAF") ||
-    roles.includes("DGA") ||
-    roles.includes("DG") ||
-    roles.includes("COMPTABLE") ||
-    roles.includes("ADMIN");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [demande, setDemande] = useState(null);
-
-  const statutLower = String(demande?.statut || "").toLowerCase();
-  const isDraft = statutLower === "draft" || statutLower === "brouillon";
-  const canDownloadPdf = canDownloadPdfRole && (!isDraft || roles.includes("ADMIN"));
-
-  const [docsLoading, setDocsLoading] = useState(true);
   const [documents, setDocuments] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [paiements, setPaiements] = useState([]);
+  const [paiementsLoading, setPaiementsLoading] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
-  const [payOpen, setPayOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [bcCreating, setBcCreating] = useState(false);
-  const [bcConfirmArmed, setBcConfirmArmed] = useState(false);
-  const bcConfirmTimerRef = useRef(null);
-
-  const canPayThis = useMemo(() => {
-    const s = String(demande?.statut || "").toLowerCase();
-    return canPayRole && (s === "approuvee" || s === "en_attente_paiement" || s === "receptionnee");
-  }, [demande?.statut, canPayRole]);
-
-  const canCreateBc = useMemo(() => {
-    const s = String(demande?.statut || "").toLowerCase();
-    const allowedRole = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DIRECTEUR") || roles.includes("RESPONSABLE") || roles.includes("DEMANDEUR");
-    const hasAnyBc = Array.isArray(demande?.bons_commande) && demande.bons_commande.length > 0;
-    return !hasAnyBc && allowedRole && (s === "approuvee" || s === "en_attente_paiement");
-  }, [demande?.statut, roles]);
-
-  // ✅ règle simple UI : si au moins un step valide => plus d'édition complète
-  const hasAnyValidation = useMemo(() => {
-    const steps = demande?.validation_steps || [];
-    return steps.some((x) => {
-      const s = String(x?.status || "").toLowerCase();
-      return s === "valide" || s === "rejete" || s === "rejetee" || s === "rejeté";
-    });
-  }, [demande?.validation_steps]);
-
-  const isEngaged = useMemo(() => {
-    const statut = String(demande?.statut || "").toLowerCase();
-    const isEditableStage = statut === "draft" || statut === "brouillon" || statut === "soumise" || statut.startsWith("validation_");
-    return hasAnyValidation || !isEditableStage;
-  }, [demande?.statut, hasAnyValidation]);
-
-  const canEditAll = !isEngaged;
-
-  const canEditThisDemande = useMemo(() => {
-    const isAdmin = roles.includes("ADMIN");
-    const demandeurId = demande?.demandeur_id != null ? Number(demande.demandeur_id) : null;
-    const isOwner = userAgentId != null && demandeurId != null && userAgentId === demandeurId;
-    return canEditAll && (isAdmin || isOwner);
-  }, [canEditAll, demande?.demandeur_id, roles, userAgentId]);
-
-  const currentStep = useMemo(() => {
-    const steps = Array.isArray(demande?.validation_steps) ? demande.validation_steps : [];
-    const s = steps.find((x) => String(x?.status || "").toLowerCase() === "en_attente");
-    return s || null;
-  }, [demande?.validation_steps]);
-
-  const paiementConditions = useMemo(() => {
-    const raw = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
-    return raw
-      .filter(Boolean)
-      .slice()
-      .sort((a, b) => {
-        const pa = Number(a?.pourcentage ?? 0);
-        const pb = Number(b?.pourcentage ?? 0);
-        if (pb !== pa) return pb - pa;
-        return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
-      });
-  }, [demande?.conditions_paiement]);
-
-  const paiementMode = useMemo(() => {
-    const direct = demande?.conditions_paiement_mode;
-    if (direct) return labelPaiementMode(direct);
-
-    const ps = paiementConditions.map((x) => Number(x?.pourcentage ?? 0)).filter((x) => Number.isFinite(x));
-    if (ps.length === 1 && ps[0] === 100) return "100/100";
-    if (ps.length === 2) {
-      const s = ps.slice().sort((a, b) => b - a);
-      if (s[0] === 70 && s[1] === 30) return "70/30";
-      if (s[0] === 50 && s[1] === 50) return "50/50";
-    }
-    return paiementConditions.length ? "PERSONNALISÉ" : "-";
-  }, [demande?.conditions_paiement_mode, paiementConditions]);
-
-  const unpaidTranches = useMemo(() => {
-    return paiementConditions.filter((t) => {
-      const statut = String(t?.statut || "").toLowerCase();
-      const paid =
-        statut === "paye" ||
-        statut === "payee" ||
-        statut === "payé" ||
-        statut === "payée" ||
-        Boolean(t?.paiement_id);
-      return !paid;
-    });
-  }, [paiementConditions]);
-
-  const remainingAmount = useMemo(() => {
-    return unpaidTranches.reduce((sum, t) => sum + Number(t?.montant_prevu ?? 0), 0);
-  }, [unpaidTranches]);
-
-  const nextTranche = unpaidTranches.length ? unpaidTranches[0] : null;
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadType, setUploadType] = useState("devis_proforma");
+  const [uploadTypeAutre, setUploadTypeAutre] = useState("");
+  const [uploadFiles, setUploadFiles] = useState([]);
 
   const fetchDemande = async () => {
     setLoading(true);
@@ -196,587 +70,688 @@ export default function DemandeDetail() {
   };
 
   const fetchDocs = async (demandeId) => {
+    if (!demandeId) return;
     setDocsLoading(true);
     try {
       const res = await listDocuments({ demande_id: demandeId });
-      if (!res?.success) throw new Error(res?.message || "Erreur chargement documents");
-      setDocuments(res.data || []);
-    } catch {
-      setDocuments([]);
+      if (res?.success) setDocuments(res.data || []);
+      else setDocuments([]);
     } finally {
       setDocsLoading(false);
     }
   };
 
-  const documentsSorted = useMemo(() => {
-    const docs = Array.isArray(documents) ? documents : [];
-    return docs
-      .slice()
-      .sort((a, b) => {
-        const ta = String(a?.type_document || "").toLowerCase();
-        const tb = String(b?.type_document || "").toLowerCase();
-
-        // proforma en premier
-        const pa = ta === "proforma" ? 0 : 1;
-        const pb = tb === "proforma" ? 0 : 1;
-        if (pa !== pb) return pa - pb;
-
-        // puis tri par date décroissante (fallback id)
-        const da = a?.created_at ? new Date(a.created_at).getTime() : 0;
-        const db = b?.created_at ? new Date(b.created_at).getTime() : 0;
-        if (db !== da) return db - da;
-        return Number(b?.id || 0) - Number(a?.id || 0);
+  const fetchPaiements = async (demandeId) => {
+    if (!demandeId) return;
+    setPaiementsLoading(true);
+    try {
+      const res = await fetch(`/api/paiements?demande_id=${demandeId}`, {
+        headers: { Authorization: `Bearer ${user.token}` },
       });
-  }, [documents]);
-
-  const proformaCount = useMemo(() => {
-    return (Array.isArray(documents) ? documents : []).filter(
-      (d) => String(d?.type_document || "").toLowerCase() === "proforma"
-    ).length;
-  }, [documents]);
+      const data = await res.json();
+      if (data.success) setPaiements(data.data || []);
+      else setPaiements([]);
+    } catch (e) {
+      setPaiements([]);
+    } finally {
+      setPaiementsLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchDemande();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uuid]);
 
   useEffect(() => {
-    if (demande?.id) fetchDocs(demande.id);
+    if (demande?.id) {
+      fetchDocs(demande.id);
+      fetchPaiements(demande.id);
+    }
   }, [demande?.id]);
 
-  useEffect(() => {
-    return () => {
-      if (bcConfirmTimerRef.current) {
-        clearTimeout(bcConfirmTimerRef.current);
-        bcConfirmTimerRef.current = null;
-      }
-    };
-  }, []);
+  const canEdit = useMemo(() => {
+    if (!demande || !user) return false;
+    const agentId = user?.agent?.id ?? user?.agent_id ?? user?.agentId;
+    const isOwner = Number(demande.demandeur_id) === Number(agentId);
+    const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
+    return (isOwner && isAModifier) || roles.includes("ADMIN");
+  }, [demande, user, roles]);
 
-  const onCreateBcFromDemande = async () => {
-    if (bcCreating) return;
+  const canDownloadPdf = useMemo(() => {
+    const allowedRoles = new Set(["ADMIN", "DAF", "DGA", "DG", "COMPTABLE", "DEMANDEUR"]);
+    return roles.some((r) => allowedRoles.has(String(r).toUpperCase()));
+  }, [roles]);
 
-    const demandeId = demande?.id;
-    if (!demandeId) {
-      emitToast({ variant: "error", message: "Demande introuvable" });
-      return;
-    }
-
-    const rawItems = Array.isArray(demande?.demande_items) ? demande.demande_items : [];
-    if (rawItems.length === 0) {
-      emitToast({ variant: "error", message: "Impossible: aucune ligne (item) sur la demande." });
-      return;
-    }
-
-    const items = rawItems
-      .map((it) => ({
-        designation: String(it?.designation || "").trim(),
-        quantite: Number(it?.quantite ?? 0),
-        prix_unitaire: it?.prix_unitaire !== "" && it?.prix_unitaire != null ? Number(it.prix_unitaire) : null,
-        unite: it?.unite ? String(it.unite).trim() : null,
-      }))
-      .filter((it) => it.designation && Number.isFinite(it.quantite) && it.quantite > 0);
-
-    if (items.length === 0) {
-      emitToast({
-        variant: "error",
-        message: "Aucune ligne valide (designation/quantité). Corrigez la demande puis réessayez.",
-      });
-      return;
-    }
-
+  const doUpload = async () => {
+    if (!demande?.id) return;
+    setUploadError("");
     try {
-      setBcCreating(true);
+      if (!uploadFiles?.length) throw new Error("Veuillez choisir au moins un fichier");
 
-      const payload = {
-        demande_id: demandeId,
-        date_commande: new Date().toISOString(),
-        statut: "brouillon",
-        items,
-      };
+      const typeDoc =
+        uploadType === "autre"
+          ? `autre:${String(uploadTypeAutre || "").trim()}`
+          : uploadType;
+      if (uploadType === "autre" && (!uploadTypeAutre || !String(uploadTypeAutre).trim())) {
+        throw new Error("Veuillez préciser le type (Autre)");
+      }
 
-      const res = await createBonCommande(payload);
-      if (!res?.success) throw new Error(res?.message || "Création bon de commande échouée");
+      setUploading(true);
+      const formData = new FormData();
+      for (const file of uploadFiles) {
+        formData.append("files", file);
+      }
+      formData.append("demande_id", String(demande.id));
+      formData.append("type_document", typeDoc);
 
-      const bc = res?.data;
-      emitToast({ variant: "success", message: "Bon de commande créé." });
+      const res = await fetch("/api/documents/upload", {
+        method: "POST",
+        headers: {
+          // Note: Ne pas définir Content-Type, le navigateur le fait automatiquement avec le boundary pour FormData
+          Authorization: `Bearer ${user.token}`,
+        },
+        body: formData,
+      });
 
-      const bcIdOrUuid = bc?.uuid || bc?.id;
-      if (bcIdOrUuid) nav(`/bons-commande/${bcIdOrUuid}`);
-      else fetchDemande();
+      const data = await res.json();
+      if (!data.success) throw new Error(data?.message || "Upload échoué");
+      setUploadFiles([]);
+      setUploadTypeAutre("");
+      await fetchDocs(demande.id); // Recharger les documents
+      emitToast("Fichiers uploadés avec succès", "success");
     } catch (e) {
-      emitToast({ variant: "error", message: e?.message || "Erreur création bon de commande" });
+      setUploadError(e?.message || "Erreur upload");
+      emitToast(e?.message || "Erreur upload", "error");
     } finally {
-      setBcCreating(false);
+      setUploading(false);
     }
   };
 
-  const onCreateBcClick = async () => {
-    if (bcCreating) return;
-    if (!bcConfirmArmed) {
-      setBcConfirmArmed(true);
-      emitToast({ variant: "info", message: "Cliquez encore pour confirmer la création du bon de commande." });
-      if (bcConfirmTimerRef.current) clearTimeout(bcConfirmTimerRef.current);
-      bcConfirmTimerRef.current = setTimeout(() => {
-        setBcConfirmArmed(false);
-        bcConfirmTimerRef.current = null;
-      }, 4000);
-      return;
-    }
+  const paiementsTotal = useMemo(
+    () => (paiements || []).reduce((acc, p) => acc + (Number(p.montant) || 0), 0),
+    [paiements]
+  );
 
-    setBcConfirmArmed(false);
-    if (bcConfirmTimerRef.current) {
-      clearTimeout(bcConfirmTimerRef.current);
-      bcConfirmTimerRef.current = null;
-    }
-    await onCreateBcFromDemande();
-  };
+  const conditionsPaiement = useMemo(() => {
+    if (!demande) return [];
+    return [...(demande.conditions_paiement || [])].sort((a, b) =>
+      new Date(a.created_at) - new Date(b.created_at)
+    );
+  }, [demande]);
 
-  if (loading) return <div className="text-sm text-gray-500 dark:text-gray-400">Chargement...</div>;
-  if (error) return <div className="text-sm text-red-600 dark:text-red-400">{error}</div>;
+  const itemsTotal = useMemo(() => {
+    const items = demande?.demande_items || [];
+    return items.reduce((acc, it) => {
+      const q = Number(it?.quantite);
+      const pu = Number(it?.prix_unitaire);
+      if (Number.isFinite(q) && Number.isFinite(pu)) return acc + q * pu;
+      const totalDirect = Number(it?.total_ligne);
+      if (Number.isFinite(totalDirect)) return acc + totalDirect;
+      return acc;
+    }, 0);
+  }, [demande?.demande_items]);
+
+  const paiementsById = useMemo(() => {
+    const map = new Map();
+    for (const p of paiements) {
+      if (p?.id != null) map.set(Number(p.id), p);
+    }
+    return map;
+  }, [paiements]);
+
+  const hasConditionsPaiement = conditionsPaiement.length > 0;
+  const allConditionsHavePaiement = hasConditionsPaiement
+    ? conditionsPaiement.every((c) => c.paiement_id && paiementsById.has(Number(c.paiement_id)))
+    : false;
+
+  const paiementStatus = useMemo(() => {
+    if (!demande) return { type: "none", label: "Non applicable" };
+
+    if (hasConditionsPaiement) {
+      if (allConditionsHavePaiement) {
+        return { type: "total", label: "Payé (total)" };
+      } else {
+        return { type: "partial", label: "Payé (partiel)" };
+      }
+    } else {
+      // Ancien système sans conditions de paiement
+      if (paiementsTotal > 0) {
+        const totalNet = Number(demande.montant_net ?? demande.montant) || 0;
+        if (Math.abs(paiementsTotal - totalNet) < 0.01) {
+          return { type: "total", label: "Payé (total)" };
+        } else {
+          return { type: "partial", label: "Payé (partiel)" };
+        }
+      }
+    }
+    return { type: "none", label: "Non payé" };
+  }, [demande, paiementsTotal, hasConditionsPaiement, allConditionsHavePaiement]);
+
+  const montantBrut = useMemo(() => {
+    if (!demande) return 0;
+    const brut = Number(demande.montant);
+    return Number.isFinite(brut) ? brut : 0;
+  }, [demande]);
+
+  const montantNet = useMemo(() => {
+    if (!demande) return 0;
+    const netRaw = demande.montant_net ?? demande.montant;
+    const net = Number(netRaw);
+    return Number.isFinite(net) ? net : 0;
+  }, [demande]);
+
+  const remiseType = useMemo(() => {
+    return demande?.remise_type;
+  }, [demande]);
+
+  const remiseValeur = useMemo(() => {
+    return demande?.remise_valeur;
+  }, [demande]);
+
+  const remiseMontant = useMemo(() => {
+    if (!remiseType || remiseValeur == null) return 0;
+    if (remiseType === "montant") return Number(remiseValeur);
+    if (remiseType === "pourcentage") return montantBrut * (Number(remiseValeur) / 100);
+    return 0;
+  }, [remiseType, remiseValeur, montantBrut]);
+
+  const dafCritere4Info = useMemo(
+    () => formatDafCritere4(demande?.daf_critere4, DAF_CRITERE4_LABEL),
+    [demande?.daf_critere4]
+  );
+
+  const demandeurAgent = demande?.agents_demandes_paiement_demandeur_idToagents;
+  const demandeurDirection = demande?.directions?.nom || demandeurAgent?.directions?.nom || "-";
+  const demandeurDepartement = demande?.departements?.nom || demandeurAgent?.departements?.nom || "-";
+  const demandeurService = demande?.services?.nom || demandeurAgent?.services?.nom || "-";
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Détail demande</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            UUID: <span className="font-mono">{demande?.uuid}</span>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+      {loading ? (
+        <div className="p-4 text-center">Chargement...</div>
+      ) : error ? (
+        <div className="p-4 space-y-3">
+          <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+            {error}
+          </div>
           <button
-            type="button"
-            onClick={fetchDemande}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            onClick={() => nav(-1)}
+            title="Retour"
+            aria-label="Retour"
+            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
           >
-            Rafraîchir
+            <FiArrowLeft />
           </button>
+        </div>
+      ) : demande ? (
+        <>
+          <DemandeEditModal
+            open={editModalOpen}
+            onClose={() => setEditModalOpen(false)}
+            demande={demande}
+            onSaved={fetchDemande}
+          />
 
-          {canDownloadPdf ? (
-            <>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Détail demande</h1>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                UUID: <span className="font-mono">{demande.uuid}</span>
+              </p>
+            </div>
+
+            <div className="flex gap-2">
               <button
-                type="button"
-                onClick={() =>
-                  downloadFile(`/demandes/${demande?.uuid || uuid}/pdf`, `demande_${demande?.uuid || uuid}.pdf`)
-                }
-                className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+                onClick={() => nav(-1)}
+                title="Retour"
+                aria-label="Retour"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
               >
-                Télécharger PDF
+                <FiArrowLeft />
               </button>
+              {canEdit ? (
+                <button
+                  onClick={() => setEditModalOpen(true)}
+                  title="Modifier"
+                  aria-label="Modifier"
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+                >
+                  <FiEdit2 />
+                </button>
+              ) : null}
+              {canDownloadPdf ? (
+                <button
+                  type="button"
+                  onClick={() => downloadFile(`/demandes/${demande.uuid}/pdf`, `demande_${demande.uuid}.pdf`)}
+                  title="Télécharger PDF"
+                  aria-label="Télécharger PDF"
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+                >
+                  <FiDownload />
+                </button>
+              ) : null}
               <button
-                type="button"
-                onClick={() =>
-                  downloadFile(`/demandes/${demande?.uuid || uuid}/pdf`, `demande_${demande?.uuid || uuid}.pdf`, {
-                    mode: "preview",
-                  })
-                }
-                className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+                onClick={fetchDemande}
+                title="Rafraîchir"
+                aria-label="Rafraîchir"
+                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
               >
-                Prévisualiser PDF
+                <FiRefreshCw />
               </button>
-            </>
+            </div>
+          </div>
+
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Informations de la demande</div>
+            <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+              {[
+                { label: "UUID", value: <span className="font-mono">{demande.uuid}</span> },
+                { label: "Motif", value: demande.motif },
+                {
+                  label: "Statut",
+                  value: (
+                    <span className={`inline-flex px-2 py-0.5 text-xs rounded ${demandeStatusBadgeClass(demande.statut)}`}>
+                      {labelDemandeStatut(demande.statut)}
+                    </span>
+                  ),
+                },
+                { label: "Créé", value: formatDateTime(demande.created_at) },
+                { label: "Mis à jour", value: formatDateTime(demande.updated_at) },
+                { label: "Demandeur", value: agentDisplayName(demandeurAgent) },
+                { label: "Direction", value: demandeurDirection },
+                { label: "Département", value: demandeurDepartement },
+                { label: "Service", value: demandeurService },
+                { label: "Montant brut", value: `${formatMoney(montantBrut)} FCFA` },
+                { label: "Total net", value: `${formatMoney(montantNet)} FCFA` },
+                { label: "Montant", value: `${formatMoney(montantNet)} FCFA` },
+                { label: "Devise", value: demande.devise || "FCFA" },
+                { label: "Bénéficiaire", value: demande.beneficiaire || "-" },
+                { label: "Observations", value: demande.remarque || "-" },
+                { label: "Paiement immédiat", value: demande.paiement_immediat ? "Oui" : "Non" },
+                { label: "Budget prévu", value: demande.budget_prevu ? "Oui" : "Non" },
+                { label: "Budget dispo", value: demande.budget_disponible ? "Oui" : "Non" },
+                { label: dafCritere4Info.label, value: dafCritere4Info.value },
+              ].map((item) => (
+                <div key={item.label}>
+                  <dt className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">{item.label}</dt>
+                  <dd className="mt-1 text-sm text-gray-800 dark:text-white/90 break-words">{item.value ?? "-"}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+
+          {/* Section Remise */}
+          {remiseType && remiseValeur != null && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl dark:bg-blue-950/30 dark:border-blue-900">
+              <div className="text-sm font-medium text-blue-800 dark:text-blue-200">Détail de la remise</div>
+              <div className="grid grid-cols-1 gap-3 mt-3 sm:grid-cols-3">
+                <Info label="Type de remise" value={remiseType === "montant" ? "Montant fixe" : "Pourcentage"} />
+                {remiseType === "pourcentage" ? (
+                  <Info label="Taux de remise" value={`${formatMoney(remiseValeur)}%`} />
+                ) : null}
+                <Info label="Montant de remise" value={`${formatMoney(remiseMontant)} FCFA`} />
+              </div>
+            </div>
+          )}
+
+          {/* Section Paiement Status */}
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Statut de paiement</div>
+              <span className={`px-2 py-1 text-xs rounded ${
+                paiementStatus.type === "total" 
+                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200" 
+                  : paiementStatus.type === "partial" 
+                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200" 
+                    : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+              }`}>
+                {paiementStatus.label}
+              </span>
+            </div>
+            {paiementStatus.type !== "none" && (
+              <div className="mt-2 text-sm">
+                Montant payé: <span className="font-medium">{formatMoney(paiementsTotal)} FCFA</span>
+                {paiementStatus.type === "partial" && (
+                  <>
+                    {" "}sur {formatMoney(montantNet)} FCFA
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Section Validation Steps */}
+          {demande.validation_steps && demande.validation_steps.length > 0 ? (
+            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Parcours validations</div>
+              
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Rôle</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Validé par</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Commentaire</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                    {[...demande.validation_steps]
+                      .sort((a, b) => Number(a.level) - Number(b.level))
+                      .map((step) => {
+                        const actor = validationActorLabel(step);
+                        return (
+                          <tr key={step.id}>
+                            <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{step.role_name}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`px-2 py-1 text-xs rounded ${
+                                step.status === "valide"
+                                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
+                                  : step.status === "en_attente"
+                                    ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200"
+                                    : step.status === "rejete"
+                                      ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200"
+                                      : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                              }`}>
+                                {labelValidationStepStatus(step.status)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                              <div className="space-y-0.5">
+                                <div>{actor?.primary || "-"}</div>
+                                {actor?.secondary ? (
+                                  <div className="text-xs text-gray-500 dark:text-gray-400">{actor.secondary}</div>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                              {step.validated_at ? formatDateTime(step.validated_at) : "-"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs">
+                              {step.commentaire || "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           ) : null}
 
-          <button
-            type="button"
-            disabled={!canEditThisDemande}
-            onClick={() => canEditThisDemande && setEditOpen(true)}
-            className={`px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 ${
-              canEditThisDemande ? "hover:bg-gray-50 dark:hover:bg-gray-950" : "opacity-50 cursor-not-allowed"
-            }`}
-          >
-            Modifier
-          </button>
-
-          <button
-            type="button"
-            disabled={!canPayThis}
-            onClick={() => setPayOpen(true)}
-            className={`px-4 py-2 text-sm rounded-lg ${
-              canPayThis
-                ? "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
-                : "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
-            }`}
-          >
-            Payer
-          </button>
-
-          <button
-            type="button"
-            disabled={!canCreateBc || bcCreating}
-            onClick={onCreateBcClick}
-            className={`px-4 py-2 text-sm rounded-lg ${
-              canCreateBc && !bcCreating
-                ? bcConfirmArmed
-                  ? "bg-amber-500 text-white hover:opacity-90"
-                  : "bg-emerald-600 text-white hover:opacity-90"
-                : "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
-            }`}
-          >
-            {bcCreating ? "Création..." : bcConfirmArmed ? "Confirmer BC" : "Créer BC"}
-          </button>
-        </div>
-      </div>
-
-      {/* Infos */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Info label="Motif" value={demande?.motif || "-"} />
-        <Info label="Bénéficiaire" value={demande?.beneficiaire || "-"} />
-        <Info label="Statut" value={labelDemandeStatut(demande?.statut)} />
-        <Info label="Montant" value={`${formatMoney(demande?.montant)} FCFA`} />
-        <Info label="Créée le" value={formatDateTime(demande?.created_at)} />
-        <Info label="MàJ le" value={formatDateTime(demande?.updated_at)} />
-      </div>
-
-      {/* Conditions de paiement */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Conditions de paiement</div>
-            <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Mode: <span className="font-medium text-gray-800 dark:text-white/90">{paiementMode}</span>
-            </div>
-          </div>
-
-          <div className="text-sm text-gray-600 dark:text-gray-300">
-            <div>
-              Restant: <span className="font-medium">{formatMoney(remainingAmount)} FCFA</span>
-            </div>
-            <div>
-              Prochaine tranche: {nextTranche ? (
-                <span className="font-medium">
-                  {Number(nextTranche?.pourcentage ?? 0)}% ({formatMoney(nextTranche?.montant_prevu)} FCFA)
-                </span>
-              ) : (
-                <span className="font-medium">-</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {paiementConditions.length ? (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left bg-gray-50 dark:bg-gray-950">
-                <tr>
-                  <th className="px-3 py-2">Tranche</th>
-                  <th className="px-3 py-2">%</th>
-                  <th className="px-3 py-2">Montant prévu</th>
-                  <th className="px-3 py-2">Statut</th>
-                  <th className="px-3 py-2">Paiement</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paiementConditions.map((t, idx) => (
-                  <tr key={t.id ?? idx} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-3 py-2">Tranche {idx + 1}</td>
-                    <td className="px-3 py-2">{t?.pourcentage != null ? `${Number(t.pourcentage)}%` : "-"}</td>
-                    <td className="px-3 py-2">{t?.montant_prevu != null ? `${formatMoney(t.montant_prevu)} FCFA` : "-"}</td>
-                    <td className="px-3 py-2">
-                      <TrancheBadge statut={t?.statut} />
-                    </td>
-                    <td className="px-3 py-2">
-                      {t?.paiement_id ? <span className="font-mono text-xs">{String(t.paiement_id)}</span> : "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucune tranche (ancien enregistrement ou non initialisé).</div>
-        )}
-      </div>
-
-      {/* Description */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="text-sm font-medium text-gray-800 dark:text-white/90">Description</div>
-        <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
-          {demande?.description || "-"}
-        </div>
-      </div>
-
-      {/* Items */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="text-sm font-medium text-gray-800 dark:text-white/90">Lignes (items)</div>
-
-        {Array.isArray(demande?.demande_items) && demande.demande_items.length ? (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left bg-gray-50 dark:bg-gray-950">
-                <tr>
-                  <th className="px-3 py-2">Désignation</th>
-                  <th className="px-3 py-2">Qté</th>
-                  <th className="px-3 py-2">PU</th>
-                  <th className="px-3 py-2">Unité</th>
-                  <th className="px-3 py-2">Total</th>
-                  <th className="px-3 py-2">Spécifications</th>
-                </tr>
-              </thead>
-              <tbody>
-                {demande.demande_items.map((it) => (
-                  <tr key={it.id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-3 py-2">{it.designation}</td>
-                    <td className="px-3 py-2">{it.quantite != null ? String(it.quantite) : "-"}</td>
-                    <td className="px-3 py-2">{it.prix_unitaire != null ? `${formatMoney(it.prix_unitaire)}` : "-"}</td>
-                    <td className="px-3 py-2">{it.unite || "-"}</td>
-                    <td className="px-3 py-2">{it.total_ligne != null ? `${formatMoney(it.total_ligne)}` : "-"}</td>
-                    <td className="px-3 py-2">{it.specifications || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucune ligne.</div>
-        )}
-      </div>
-
-      {/* Parcours validations */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Parcours validations</div>
-            <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Étape courante: {currentStep?.role_name ? <span className="font-medium">{currentStep.role_name}</span> : "-"}
-            </div>
-          </div>
-        </div>
-
-        {Array.isArray(demande?.validation_steps) && demande.validation_steps.length ? (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left bg-gray-50 dark:bg-gray-950">
-                <tr>
-                  <th className="px-3 py-2">Niveau</th>
-                  <th className="px-3 py-2">Rôle</th>
-                  <th className="px-3 py-2">Statut</th>
-                  <th className="px-3 py-2">Validé le</th>
-                  <th className="px-3 py-2">Commentaire</th>
-                </tr>
-              </thead>
-              <tbody>
-                {demande.validation_steps
-                  .slice()
-                  .sort((a, b) => Number(a.level || 0) - Number(b.level || 0))
-                  .map((s) => (
-                    <tr key={s.id} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-3 py-2">{s.level ?? "-"}</td>
-                      <td className="px-3 py-2">{s.role_name || "-"}</td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={s.status} />
-                      </td>
-                      <td className="px-3 py-2">{formatDateTime(s.validated_at)}</td>
-                      <td className="px-3 py-2">{s.commentaire || "-"}</td>
+          {/* Section Conditions de paiement */}
+          {hasConditionsPaiement ? (
+            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Conditions de paiement</div>
+              
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Libellé</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant prévu</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant payé</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Paiement</th>
                     </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucune étape de validation.</div>
-        )}
-      </div>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                    {conditionsPaiement.map((cond) => {
+                        const paiement = cond.paiement_id ? paiementsById.get(Number(cond.paiement_id)) : null;
+                        const isPaye = !!paiement;
+                      
+                      return (
+                        <tr key={cond.id}>
+                          <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
+                            {cond.label} {cond.pourcentage ? `(${formatMoney(cond.pourcentage)}%)` : ""}
+                            {cond.condition_texte ? ` - ${cond.condition_texte}` : ""}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
+                            {formatMoney(cond.montant_prevu)} FCFA
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <span className={`px-2 py-1 text-xs rounded ${
+                              isPaye
+                                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
+                                : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                            }`}>
+                              {isPaye ? "Payé" : "Prévu"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
+                            {paiement?.montant != null ? `${formatMoney(paiement.montant)} FCFA` : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                            {paiement ? (
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm text-gray-800 dark:text-white/90">
+                                  {paiement.moyen_paiement || "Paiement"}
+                                </div>
+                                <Link 
+                                  to={`/paiements/${paiement.uuid}`}
+                                  title="Voir le paiement"
+                                  aria-label="Voir le paiement"
+                                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                                >
+                                  <FiEye />
+                                </Link>
+                              </div>
+                            ) : "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
-      {/* Documents */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-gray-800 dark:text-white/90">
-            Documents liés{proformaCount ? (
-              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">({proformaCount} proforma)</span>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={() => demande?.id && fetchDocs(demande.id)}
-            className="px-3 py-2 text-xs border border-gray-200 rounded-lg dark:border-gray-800"
-          >
-            Recharger
-          </button>
-        </div>
-
-        {docsLoading ? (
-          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Chargement documents...</div>
-        ) : documentsSorted.length === 0 ? (
-          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
-        ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left bg-gray-50 dark:bg-gray-950">
-                <tr>
-                  <th className="px-3 py-2">Type</th>
-                  <th className="px-3 py-2">Nom fichier</th>
-                  <th className="px-3 py-2">Format</th>
-                  <th className="px-3 py-2">Taille</th>
-                  <th className="px-3 py-2">Créé</th>
-                  <th className="px-3 py-2 text-right">Ouvrir</th>
-                </tr>
-              </thead>
-              <tbody>
-                {documentsSorted.map((doc) => (
-                  <tr key={doc.id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-3 py-2">{doc.type_document}</td>
-                    <td className="px-3 py-2">{doc.nom_fichier}</td>
-                    <td className="px-3 py-2">{doc.format}</td>
-                    <td className="px-3 py-2">{doc.taille ? Number(doc.taille).toLocaleString("fr-FR") : "-"}</td>
-                    <td className="px-3 py-2">{formatDateTime(doc.created_at)}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
-                        }
-                        className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                      >
-                        Ouvrir
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Bons de commande */}
-      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-gray-800 dark:text-white/90">Bons de commande</div>
-          <button
-            type="button"
-            disabled={!canCreateBc || bcCreating}
-            onClick={onCreateBcClick}
-            className={`px-3 py-2 text-xs rounded-lg ${
-              canCreateBc && !bcCreating
-                ? bcConfirmArmed
-                  ? "bg-amber-500 text-white hover:opacity-90"
-                  : "bg-emerald-600 text-white hover:opacity-90"
-                : "bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-500"
-            }`}
-          >
-            {bcCreating ? "Création..." : bcConfirmArmed ? "Confirmer" : "Nouveau"}
-          </button>
-        </div>
-
-        {Array.isArray(demande?.bons_commande) && demande.bons_commande.length ? (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left bg-gray-50 dark:bg-gray-950">
-                <tr>
-                  <th className="px-3 py-2">Numéro</th>
-                  <th className="px-3 py-2">Statut</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Documents</th>
-                  <th className="px-3 py-2 text-right">PDF</th>
-                </tr>
-              </thead>
-              <tbody>
-                {demande.bons_commande.map((bc) => (
-                  <tr key={bc.id} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-3 py-2 font-mono text-xs">
-                      <Link
-                        to={`/bons-commande/${bc.uuid || bc.id}`}
-                        className="hover:underline"
-                      >
-                        {bc.numero || bc.uuid}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">{labelBonCommandeStatut(bc.statut)}</td>
-                    <td className="px-3 py-2">{formatDateTime(bc.date_commande)}</td>
-                    <td className="px-3 py-2">
-                      {Array.isArray(bc?.documents) && bc.documents.length ? (
-                        <div className="flex flex-wrap gap-2">
-                          {bc.documents.slice(0, 3).map((doc) => (
-                            <button
-                              key={doc.id}
-                              type="button"
-                              onClick={() =>
-                                downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
-                              }
-                              className="px-2 py-1 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                              title={doc.nom_fichier}
-                            >
-                              {doc.nom_fichier || doc.type_document || "document"}
-                            </button>
-                          ))}
-                          {bc.documents.length > 3 ? (
-                            <span className="text-xs text-gray-500 dark:text-gray-400">+{bc.documents.length - 3}</span>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-500 dark:text-gray-400">Aucun</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {canDownloadPdf ? (
-                        <div className="inline-flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              downloadFile(
-                                `/bons-commande/${bc.uuid || bc.id}/pdf`,
-                                `bon_commande_${bc.numero || bc.uuid || bc.id}.pdf`
-                              )
-                            }
-                            className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+          {/* Section Paiements */}
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Paiements</div>
+            
+            {paiementsLoading ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Chargement...</div>
+            ) : paiements.length === 0 ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun paiement enregistré.</div>
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Lien</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                    {paiements.map((p) => (
+                      <tr key={p.id}>
+                        <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{p.uuid}</td>
+                        <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{formatMoney(p.montant)} FCFA</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(p.created_at)}</td>
+                        <td className="px-4 py-3 text-sm">
+                          <Link 
+                            to={`/paiements/${p.uuid}`}
+                            className="text-blue-600 hover:underline dark:text-blue-400"
                           >
-                            Télécharger
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              downloadFile(
-                                `/bons-commande/${bc.uuid || bc.id}/pdf`,
-                                `bon_commande_${bc.numero || bc.uuid || bc.id}.pdf`,
-                                { mode: "preview" }
-                              )
-                            }
-                            className="px-3 py-2 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
-                          >
-                            Prévisualiser
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                            Voir
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun bon de commande.</div>
-        )}
-      </div>
 
-      {/* Modal edit */}
-      <DemandeEditModal
-        open={editOpen}
-        onClose={() => setEditOpen(false)}
-        demande={demande}
-        canEditAll={canEditThisDemande}
-        onUpdated={() => {
-          fetchDemande();
-          demande?.id && fetchDocs(demande.id);
-        }}
-      />
+          {/* Section Items */}
+          {demande.demande_items && demande.demande_items.length > 0 ? (
+            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Items de la demande</div>
+              
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Désignation</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Quantité</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Unité</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">PU</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                    {demande.demande_items.map((it) => {
+                      const q = Number(it?.quantite);
+                      const pu = Number(it?.prix_unitaire);
+                      const lineTotal = Number.isFinite(q) && Number.isFinite(pu)
+                        ? q * pu
+                        : Number(it?.total_ligne);
 
-      {/* Modal paiement */}
-      <CreatePaiementModal
-        open={payOpen}
-        demande={demande}
-        onClose={() => setPayOpen(false)}
-        onCreated={() => {
-          fetchDemande();
-          demande?.id && fetchDocs(demande.id);
-        }}
-      />
+                      return (
+                      <tr key={it.id}>
+                        <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90 max-w-xs">{it.designation}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{it.quantite}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{it.unite || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
+                          {it.prix_unitaire != null ? `${formatMoney(it.prix_unitaire)} FCFA` : "-"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
+                          {Number.isFinite(lineTotal) ? `${formatMoney(lineTotal)} FCFA` : "-"}
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200" colSpan={4}>
+                        Total des items
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-white/90">
+                        {formatMoney(itemsTotal)} FCFA
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
+          {/* Section Documents */}
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Documents joints</div>
+              <button
+                type="button"
+                onClick={() => demande?.id && fetchDocs(demande.id)}
+                title="Recharger"
+                aria-label="Recharger"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+              >
+                <FiRefreshCw />
+              </button>
+            </div>
+
+            <div className="mt-3 p-3 border border-gray-200 rounded-lg dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Ajouter des pièces</div>
+              {uploadError ? (
+                <div className="mt-2 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                  {uploadError}
+                </div>
+              ) : null}
+
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Type</div>
+                  <select
+                    value={uploadType}
+                    onChange={(e) => {
+                      setUploadType(e.target.value);
+                      if (e.target.value !== "autre") setUploadTypeAutre("");
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                  >
+                    <option value="devis_proforma">Devis / Proforma</option>
+                    <option value="facture_proforma">Facture proforma</option>
+                    <option value="contrat">Contrat</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                </div>
+
+                {uploadType === "autre" ? (
+                  <div>
+                    <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Préciser</div>
+                    <input
+                      value={uploadTypeAutre}
+                      onChange={(e) => setUploadTypeAutre(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="Ex: Cahier des charges"
+                    />
+                  </div>
+                ) : null}
+
+                <div className={uploadType === "autre" ? "sm:col-span-1" : "sm:col-span-2"}>
+                  <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Fichiers</div>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
+                    className="w-full text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  disabled={uploading || !uploadFiles.length}
+                  onClick={doUpload}
+                  title={uploading ? "Upload..." : "Uploader"}
+                  aria-label={uploading ? "Upload..." : "Uploader"}
+                  className={`inline-flex items-center justify-center p-2 rounded-lg ${
+                    uploading || !uploadFiles.length
+                      ? "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
+                      : "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                  }`}
+                >
+                  <FiUpload />
+                </button>
+              </div>
+            </div>
+
+            {docsLoading ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Chargement documents...</div>
+            ) : documents.length === 0 ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {documents.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() =>
+                      downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
+                    }
+                    className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                  >
+                    <div>
+                      <div className="font-medium">{doc.type_document || "document"}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                    </div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

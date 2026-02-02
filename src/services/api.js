@@ -95,7 +95,7 @@ api.interceptors.response.use(
         last401ToastAt = now;
         emitToast({
           variant: "warning",
-          title: "Session expirée",
+          title: "Identifiants incorrectes",
           message: "Veuillez vous reconnecter.",
         });
       }

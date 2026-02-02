@@ -31,11 +31,13 @@ import Home from "./pages/Dashboard/Home";
 import AuthGuard from "./guards/AuthGuard.jsx";
 import GuestGuard from "./guards/GuestGuard.jsx";
 import RoleGuard from "./guards/RoleGuard.jsx";
+import PermissionGuard from "./guards/PermissionGuard.jsx";
 import ForcePasswordChangeGuard from "./guards/ForcePasswordChangeGuard.jsx";
 
 // modules métier
 import PaiementsList from "./pages/Paiements/PaiementsList";
 import PaiementDetail from "./pages/Paiements/PaiementDetail";
+import PaiementsPending from "./pages/Paiements/PaiementsPending";
 import DemandesAllList from "./pages/Demandes/DemandesAllList";
 import DemandesMyList from "./pages/Demandes/DemandesMyList";
 import DemandeDetail from "./pages/Demandes/DemandeDetail";
@@ -45,7 +47,6 @@ import ValidationsPending from "./pages/Validations/ValidationsPending";
 import ValidationDetail from "./pages/Validations/ValidationDetail";
 import ReceptionsList from "./pages/Receptions/ReceptionsList";
 import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
-import BonCommandeDetail from "./pages/BonsCommande/BonCommandeDetail";
 
 // admin
 import UsersAdmin from "./pages/Admin/UsersAdmin";
@@ -99,31 +100,31 @@ export default function App() {
 
             {/* ---------------- MODULES METIER PROTEGES PAR ROLES ---------------- */}
 
-              {/* Paiements/Réceptions : COMPTABLE + DAF + DIRECTEUR + ADMIN */}
-              <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "DIRECTEUR", "ADMIN"]} />}>
+              {/* Paiements/Réceptions : COMPTABLE + DAF + CAISSE + DIRECTEUR + ADMIN */}
+              <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "CAISSE", "DIRECTEUR", "ADMIN"]} />}>
                 <Route path="/paiements" element={<PaiementsList />} />
+                <Route path="/paiements/done" element={<PaiementsList />} />
+                <Route path="/paiements/pending" element={<PaiementsPending />} />
                 <Route path="/paiements/:uuid" element={<PaiementDetail />} />
-                <Route path="/receptions" element={<ReceptionsList />} />
+                <Route path="/receptions" element={<ReceptionsList mode="done" />} />
+                <Route path="/receptions/done" element={<ReceptionsList mode="done" />} />
+                <Route path="/receptions/pending" element={<ReceptionsList mode="pending" />} />
                 <Route path="/receptions/:uuid" element={<ReceptionDetail />} />
               </Route>
 
               {/* Demandes (toutes) : DIRECTEUR + DG + DGA + DAF + ADMIN */}
-              <Route element={<RoleGuard allow={["RESPONSABLE","DEMANDEUR", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN", "COMPTABLE"]} />}>
+              <Route element={<RoleGuard allow={["RESPONSABLE","DEMANDEUR", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN", "COMPTABLE", "CAISSE", "ASSISTANTE_TECHNIQUE"]} />}>
                 <Route path="/demandes/all" element={<DemandesAllList />} />
                 <Route path="/demandes/my" element={<DemandesMyList />} />
                 <Route path="/demandes/:uuid" element={<DemandeDetail />} />
                 <Route path="/demandes/create" element={<CreateDemande />} />
               </Route>
 
-              {/* Bons de commande : DEMANDEUR/RESPONSABLE/... */}
-              <Route element={<RoleGuard allow={["DEMANDEUR", "RESPONSABLE", "DIRECTEUR", "DAF", "DGA", "DG", "ADMIN"]} />}>
-                <Route path="/bons-commande/:uuid" element={<BonCommandeDetail />} />
-              </Route>
-
               {/* Validations : RESPONSABLE + DIRECTEUR + DG + DGA + DAF + ADMIN */}
               <Route element={<RoleGuard allow={["RESPONSABLE", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
                 <Route path="/validations/pending" element={<ValidationsPending />} />
                 <Route path="/validations/done" element={<ValidationsDone />} />
+                <Route path="/validations/:uuid" element={<ValidationDetail />} />
                 <Route path="/validations/uuid/:uuid" element={<ValidationDetail />} />
               </Route>
 
@@ -132,15 +133,34 @@ export default function App() {
                 <Route path="/delegations" element={<DelegationsAdmin />} />
               </Route>
 
-              {/* Admin : ADMIN only */}
-              <Route element={<RoleGuard allow={["ADMIN"]} />}>
+              {/* Admin : piloté par permissions (DB) */}
+              <Route element={<PermissionGuard allow={["USERS_MANAGE"]} />}>
                 <Route path="/admin/users" element={<UsersAdmin />} />
+              </Route>
+
+              <Route element={<PermissionGuard allow={["PERMISSIONS_MANAGE"]} />}>
                 <Route path="/admin/permissions" element={<PermissionsAdmin />} />
+              </Route>
+
+              <Route element={<PermissionGuard allow={["AGENTS_MANAGE"]} />}>
                 <Route path="/admin/hierarchy" element={<HierarchyAdmin />} />
-                <Route path="/admin/directions" element={<DirectionsAdmin />} />
-                <Route path="/admin/departements" element={<DepartementsAdmin />} />
-                <Route path="/admin/services" element={<ServicesAdmin />} />
                 <Route path="/admin/agents" element={<AgentsAdmin />} />
+              </Route>
+
+              <Route element={<PermissionGuard allow={["DIRECTIONS_MANAGE"]} />}>
+                <Route path="/admin/directions" element={<DirectionsAdmin />} />
+              </Route>
+
+              <Route element={<PermissionGuard allow={["DEPARTEMENTS_MANAGE"]} />}>
+                <Route path="/admin/departements" element={<DepartementsAdmin />} />
+              </Route>
+
+              <Route element={<PermissionGuard allow={["SERVICES_MANAGE"]} />}>
+                <Route path="/admin/services" element={<ServicesAdmin />} />
+              </Route>
+
+              {/* Delegations admin screen stays role-based for now */}
+              <Route element={<RoleGuard allow={["ADMIN"]} />}>
                 <Route path="/admin/delegations" element={<DelegationsAdmin />} />
               </Route>
 

@@ -1,276 +1,346 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { FiEye, FiRefreshCw } from "react-icons/fi";
 import { listAllDemandes } from "../../services/demandes.services";
-import { useAuth } from "../../context/AuthContext";
-import CreatePaiementModal from "../Paiements/CreatePaiementModal";
 import Pagination from "../../components/common/Pagination";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
-import FullscreenLoader from "../../components/common/FullScreenLoader";
-import LoadingButton from "../../components/common/LoadingButton";
-import { labelDemandeStatut } from "../../utils/statusLabels";
-import DatePicker from "../../components/form/date-picker";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
+import DatePicker from "../../components/form/date-picker";
+import { useAuth } from "../../context/AuthContext";
+import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
+import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 
 const STORAGE_KEY = "filters:demandes:all";
+const ROLE_VIEWS = {
+  GLOBAL: "GLOBAL",
+  RESPONSABLE: "RESPONSABLE",
+  DEMANDEUR: "DEMANDEUR",
+};
 
-function EyeIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-function MoneyIcon({ className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M21 7H3v10h18V7Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M7 12h.01M17 12h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
-function formatMoney(v) {
-  const n = Number(v ?? 0);
-  if (Number.isNaN(n)) return String(v ?? "");
-  return new Intl.NumberFormat("fr-FR").format(n);
-}
-function formatDate(iso) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  return new Intl.DateTimeFormat("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+function formatDate(input) {
+  if (!input) return "";
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
 }
 
 const initialState = {
-  filters: { statut: "", beneficiaire: "", dateStart: "", dateEnd: "" },
+  filters: { statut: "", beneficiaire: "", dateStart: "", dateEnd: "", roleView: "" },
   page: 1,
   pageSize: 10,
 };
 
+function normalizeRole(r) {
+  return String(r || "").trim().toUpperCase();
+}
+
+function hasAnyRole(roles, list) {
+  const set = new Set((roles || []).map(normalizeRole));
+  return list.some((r) => set.has(normalizeRole(r)));
+}
+
+function getAllowedRoleViews(roles = []) {
+  if (hasAnyRole(roles, ["ADMIN", "DG", "DGA", "DAF", "COMPTABLE", "CAISSE"])) {
+    return [ROLE_VIEWS.GLOBAL];
+  }
+
+  if (hasAnyRole(roles, ["RESPONSABLE", "DIRECTEUR", "ASSISTANTE_TECHNIQUE"])) {
+    return [ROLE_VIEWS.RESPONSABLE];
+  }
+
+  return [ROLE_VIEWS.DEMANDEUR];
+}
+
+function getDefaultRoleView(roles = []) {
+  if (hasAnyRole(roles, ["ADMIN", "DG", "DGA", "DAF", "COMPTABLE", "CAISSE"])) return ROLE_VIEWS.GLOBAL;
+  if (hasAnyRole(roles, ["RESPONSABLE", "DIRECTEUR", "ASSISTANTE_TECHNIQUE"])) return ROLE_VIEWS.RESPONSABLE;
+  return ROLE_VIEWS.DEMANDEUR;
+}
+
+function getRoleViewLabel(roleView, roles = []) {
+  if (roleView === ROLE_VIEWS.DEMANDEUR) return "Mes demandes";
+  if (roleView === ROLE_VIEWS.GLOBAL) return "Toutes les directions";
+  if (roleView === ROLE_VIEWS.RESPONSABLE) {
+    if (hasAnyRole(roles, ["ASSISTANTE_TECHNIQUE"])) return "Direction (assistante technique)";
+    if (hasAnyRole(roles, ["DIRECTEUR"])) return "Direction (directeur)";
+    if (hasAnyRole(roles, ["RESPONSABLE"])) return "Direction (responsable)";
+    return "Ma direction";
+  }
+  return "Vue personnalisée";
+}
+
 export default function DemandesAllList() {
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-  const canPay = roles.includes("DAF") || roles.includes("COMPTABLE") || roles.includes("ADMIN");
-
-  const persisted = useMemo(() => loadPersistedState(STORAGE_KEY, initialState), []);
-  const [filters, setFilters] = useState(persisted.filters);
-  const [page, setPage] = useState(persisted.page);
-  const [pageSize, setPageSize] = useState(persisted.pageSize);
+  const allowedRoleViews = useMemo(() => getAllowedRoleViews(roles), [roles]);
+  const defaultRoleView = useMemo(() => getDefaultRoleView(roles), [roles]);
+  const showRoleView = allowedRoleViews.length > 1;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [rows, setRows] = useState([]);
+  const [data, setData] = useState([]);
+  const [filtered, setFiltered] = useState([]);
 
-  const [payOpen, setPayOpen] = useState(false);
-  const [selectedDemande, setSelectedDemande] = useState(null);
+  const [state, setState] = useState(() => {
+    const saved = loadPersistedState(STORAGE_KEY);
+    const next = saved ? { ...initialState, ...saved } : initialState;
+    const initialRoleView = next.filters.roleView || defaultRoleView;
+    const roleViewFinal = allowedRoleViews.includes(initialRoleView) ? initialRoleView : defaultRoleView;
+    return { ...next, filters: { ...next.filters, roleView: roleViewFinal } };
+  });
 
   useEffect(() => {
-    savePersistedState(STORAGE_KEY, { filters, page, pageSize });
-  }, [filters, page, pageSize]);
+    if (!allowedRoleViews.includes(state.filters.roleView)) {
+      const roleViewFinal = allowedRoleViews.includes(defaultRoleView) ? defaultRoleView : allowedRoleViews[0] || "";
+      const newState = { ...state, filters: { ...state.filters, roleView: roleViewFinal } };
+      setState(newState);
+      savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+    }
+  }, [allowedRoleViews, defaultRoleView, state.filters.roleView]);
 
-  const fetchData = async () => {
+  const fetch = async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await listAllDemandes();
+      const params = {
+        page: state.page,
+        pageSize: state.pageSize,
+        ...(state.filters.statut ? { statut: state.filters.statut } : {}),
+        ...(state.filters.beneficiaire ? { beneficiaire: state.filters.beneficiaire } : {}),
+        ...(state.filters.dateStart ? { dateStart: state.filters.dateStart } : {}),
+        ...(state.filters.dateEnd ? { dateEnd: state.filters.dateEnd } : {}),
+        ...(state.filters.roleView ? { roleView: state.filters.roleView } : {}),
+      };
+
+      const res = await listAllDemandes(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement demandes");
-      setRows(res.data || []);
+      setData(res.data || []);
+      setFiltered(res.data || []);
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
+      setData([]);
+      setFiltered([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
-
-  const canPayThisDemande = (d) => {
-    const s = String(d?.statut || "").toLowerCase();
-    return canPay && (s === "approuvee" || s === "en_attente_paiement");
-  };
-
-  const filtered = useMemo(() => {
-    return (rows || []).filter((d) => {
-      const statut = String(d?.statut || "");
-      const benef = String(d?.beneficiaire || "");
-      const okStatut = !filters.statut || statut.toLowerCase().includes(filters.statut.toLowerCase());
-      const okBenef = !filters.beneficiaire || benef.toLowerCase().includes(filters.beneficiaire.toLowerCase());
-
-      const created = d?.created_at ? new Date(d.created_at) : null;
-      const start = parseDateOnlyStart(filters.dateStart);
-      const end = parseDateOnlyEnd(filters.dateEnd);
-
-      const okStart = !start || (created && created >= start);
-      const okEnd = !end || (created && created <= end);
-
-      return okStatut && okBenef && okStart && okEnd;
-    });
-  }, [rows, filters]);
+    fetch();
+  }, [state.page, state.pageSize, state.filters]);
 
   useEffect(() => {
-    setPage(1);
-  }, [filters.statut, filters.beneficiaire, filters.dateStart, filters.dateEnd]);
-
-  const total = filtered.length;
-  const paginated = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, page, pageSize]);
+    if (state.filters.statut || state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd || state.filters.roleView) {
+      const filtered = (data || []).filter((d) => {
+        if (state.filters.statut && String(d.statut).toLowerCase() !== String(state.filters.statut).toLowerCase()) return false;
+        if (state.filters.beneficiaire && !String(d.beneficiaire || "").toLowerCase().includes(String(state.filters.beneficiaire).toLowerCase())) return false;
+        if (state.filters.dateStart && new Date(d.created_at) < new Date(parseDateOnlyStart(state.filters.dateStart))) return false;
+        if (state.filters.dateEnd && new Date(d.created_at) > new Date(parseDateOnlyEnd(state.filters.dateEnd))) return false;
+        // Note: Le filtre roleView est appliqué côté backend, donc on ne le filtre pas ici côté frontend
+        return true;
+      });
+      setFiltered(filtered);
+    } else {
+      setFiltered(data || []);
+    }
+  }, [data, state.filters]);
 
   const resetFilters = () => {
-    setFilters(initialState.filters);
-    setPage(1);
-    setPageSize(initialState.pageSize);
-    clearPersistedState(STORAGE_KEY);
+    const newState = { ...initialState, page: 1 };
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
+
+  const updateFilter = (key, value) => {
+    const newFilters = { ...state.filters, [key]: value };
+    const newState = { ...state, filters: newFilters, page: 1 }; // Reset page when filter changes
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
+  };
+
+  const updatePagination = (page, pageSize) => {
+    const newState = { ...state, page, pageSize };
+    setState(newState);
+    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+  };
+
+  const total = filtered.length;
+
+  const canViewDetails = true;
 
   return (
     <div className="space-y-4">
-      <FullscreenLoader show={loading} label="Chargement des demandes..." />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Demandes</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Liste et actions (voir / payer).</p>
+          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Toutes les demandes</h1>
+          {showRoleView && state.filters.roleView && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Vue: {getRoleViewLabel(state.filters.roleView, roles)}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => window.location.reload()}
+          title="Actualiser"
+          aria-label="Actualiser"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+        >
+          <FiRefreshCw />
+        </button>
+      </div>
+
+      {error ? (
+        <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+        <div className={`grid grid-cols-1 gap-3 ${showRoleView ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
+          {showRoleView ? (
+            <div>
+              <label className="block text-xs text-gray-500 dark:text-gray-400">Vue</label>
+              <select
+                value={state.filters.roleView}
+                onChange={(e) => updateFilter("roleView", e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              >
+                {allowedRoleViews.includes(ROLE_VIEWS.GLOBAL) ? (
+                  <option value={ROLE_VIEWS.GLOBAL}>Vue globale</option>
+                ) : null}
+                {allowedRoleViews.includes(ROLE_VIEWS.RESPONSABLE) ? (
+                  <option value={ROLE_VIEWS.RESPONSABLE}>Ma direction</option>
+                ) : null}
+                {allowedRoleViews.includes(ROLE_VIEWS.DEMANDEUR) ? (
+                  <option value={ROLE_VIEWS.DEMANDEUR}>Mes demandes</option>
+                ) : null}
+              </select>
+            </div>
+          ) : null}
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Statut</label>
+            <select
+              value={state.filters.statut}
+              onChange={(e) => updateFilter("statut", e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              <option value="">Tous</option>
+              <option value="draft">Brouillon</option>
+              <option value="approuvee">Approuvée</option>
+              <option value="rejete">Rejetée</option>
+              <option value="a_modifier">À modifier</option>
+              <option value="en_cours_validation">En cours de validation</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Bénéficiaire</label>
+            <input
+              type="text"
+              value={state.filters.beneficiaire}
+              onChange={(e) => updateFilter("beneficiaire", e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Recherche..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Du</label>
+            <DatePicker
+              value={state.filters.dateStart ? new Date(state.filters.dateStart) : null}
+              onChange={(d) => updateFilter("dateStart", d ? formatDate(d) : "")}
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Au</label>
+            <DatePicker
+              value={state.filters.dateEnd ? new Date(state.filters.dateEnd) : null}
+              onChange={(d) => updateFilter("dateEnd", d ? formatDate(d) : "")}
+              className="w-full"
+            />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <LoadingButton
-            type="button"
-            loading={loading}
-            onClick={fetchData}
-            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
-          >
-            Rafraîchir
-          </LoadingButton>
-
+        <div className="mt-3 flex gap-2">
           <button
-            type="button"
             onClick={resetFilters}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Reset filtres
+            Réinitialiser
+          </button>
+          <button
+            onClick={clearPersistedState.bind(null, STORAGE_KEY)}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
+          >
+            Effacer filtres
           </button>
         </div>
       </div>
 
-      {/* filtres */}
-      <div className="grid grid-cols-1 gap-3 p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800 sm:grid-cols-4">
-        <input
-          value={filters.beneficiaire}
-          onChange={(e) => setFilters((p) => ({ ...p, beneficiaire: e.target.value }))}
-          placeholder="Filtrer bénéficiaire"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <input
-          value={filters.statut}
-          onChange={(e) => setFilters((p) => ({ ...p, statut: e.target.value }))}
-          placeholder="Filtrer statut"
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-        />
-        <DatePicker
-          id="demandes-all-start"
-          placeholder="Date début"
-          defaultDate={filters.dateStart || undefined}
-          onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateStart: dateStr }))}
-        />
-        <DatePicker
-          id="demandes-all-end"
-          placeholder="Date fin"
-          defaultDate={filters.dateEnd || undefined}
-          onChange={(_, dateStr) => setFilters((p) => ({ ...p, dateEnd: dateStr }))}
-        />
-      </div>
-
-      {/* table */}
-      <div className="overflow-hidden bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left bg-gray-50 dark:bg-gray-950">
-              <tr>
-                <th className="px-4 py-3">UUID</th>
-                <th className="px-4 py-3">Motif</th>
-                <th className="px-4 py-3">Bénéficiaire</th>
-                <th className="px-4 py-3">Montant</th>
-                <th className="px-4 py-3">Statut</th>
-                <th className="px-4 py-3">Créée</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {loading ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Chargement...</td></tr>
-              ) : error ? (
-                <tr><td className="px-4 py-4 text-red-600 dark:text-red-400" colSpan={7}>{error}</td></tr>
-              ) : paginated.length === 0 ? (
-                <tr><td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>Aucune demande.</td></tr>
-              ) : (
-                paginated.map((d) => (
-                  <tr key={d.uuid} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-4 py-3 font-mono text-xs">{d.uuid}</td>
-                    <td className="px-4 py-3">{d.motif}</td>
-                    <td className="px-4 py-3">{d.beneficiaire}</td>
-                    <td className="px-4 py-3">{formatMoney(d.montant)} FCFA</td>
-                    <td className="px-4 py-3">{labelDemandeStatut(d.statut)}</td>
-                    <td className="px-4 py-3">{formatDate(d.created_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex items-center gap-1">
+      {loading ? (
+        <div className="p-4 text-center">Chargement...</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande trouvée.</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Motif</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
+                {filtered.map((demande) => (
+                  <tr key={demande.id}>
+                    <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{demande.uuid}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>
+                    <td className="px-4 py-3 text-sm">{formatMoney(demande.montant_net ?? demande.montant)} FCFA</td>
+                    <td className="px-4 py-3 text-sm">
+                      <span className={`px-2 py-1 text-xs rounded ${demandeStatusBadgeClass(demande.statut)}`}>
+                        {labelDemandeStatut(demande.statut)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {canViewDetails ? (
                         <Link
-                          to={`/demandes/${d.uuid}`}
-                          className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                          to={`/demandes/${demande.uuid}`}
                           title="Voir"
+                          aria-label="Voir"
+                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
                         >
-                          <EyeIcon />
+                          <FiEye />
                         </Link>
-
-                        <button
-                          type="button"
-                          disabled={!canPayThisDemande(d)}
-                          onClick={() => {
-                            setSelectedDemande(d);
-                            setPayOpen(true);
-                          }}
-                          className={`p-2 border rounded-lg dark:border-gray-800 ${canPayThisDemande(d)
-                              ? "border-gray-200 hover:bg-gray-50 dark:hover:bg-gray-950"
-                              : "border-gray-200 opacity-50 cursor-not-allowed"
-                            }`}
-                          title="Payer"
-                        >
-                          <MoneyIcon />
-                        </button>
-                      </div>
+                      ) : (
+                        "-"
+                      )}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
           <Pagination
-            page={page}
-            pageSize={pageSize}
+            page={state.page}
+            pageSize={state.pageSize}
             total={total}
-            onPageChange={setPage}
-            onPageSizeChange={(s) => {
-              setPageSize(s);
-              setPage(1);
-            }}
+            onPageChange={(p) => updatePagination(p, state.pageSize)}
+            onPageSizeChange={(size) => updatePagination(1, size)}
           />
-        </div>
-      </div>
-
-      <CreatePaiementModal
-        open={payOpen}
-        demande={selectedDemande}
-        onClose={() => setPayOpen(false)}
-        onCreated={() => fetchData()}
-      />
+        </>
+      )}
     </div>
   );
 }

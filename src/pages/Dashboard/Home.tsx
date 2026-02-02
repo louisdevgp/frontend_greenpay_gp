@@ -6,6 +6,7 @@ import { getDashboardStats } from "../../services/stats.service";
 import Chart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 import DatePicker from "../../components/form/date-picker";
+import { formatMoney } from "../../utils/formatUtils";
 
 type MoneyCount = { count?: number; montant?: number };
 type ByStatutRow = { statut: string; count?: number; montant?: number };
@@ -99,12 +100,6 @@ export default function Home() {
     return `${from.toLocaleDateString("fr-FR")} → ${to.toLocaleDateString("fr-FR")}`;
   }, [data?.period?.from, data?.period?.to]);
 
-  const formatMoney = (v: unknown) => {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n)) return String(v ?? "");
-    return new Intl.NumberFormat("fr-FR").format(n);
-  };
-
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 
   const CHART_COLORS = useMemo(
@@ -166,7 +161,7 @@ export default function Home() {
                   placeholder="YYYY-MM"
                   dateFormat="Y-m"
                   defaultDate={`${month}-01`}
-                  onChange={(_, dateStr) => {
+                  onChange={(_date: Date | null, dateStr?: string) => {
                     if (dateStr) setMonth(dateStr);
                   }}
                 />
@@ -186,32 +181,51 @@ export default function Home() {
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
               <StatCard title="Demandes (global)" value={String(data.global?.demandes?.count ?? 0)} subtitle="Nb demandes (période)" />
-              <StatCard title="Montant (global)" value={`${formatMoney(data.global?.demandes?.montant)} FCFA`} subtitle="Total demandes (période)" />
+              <StatCard title="Montant (global)" value={`${formatMoney(data.global?.demandes?.montant ?? 0)} FCFA`} subtitle="Total demandes (période)" />
               <StatCard title="Validations en attente" value={String(data.global?.validationsPending?.count ?? 0)} subtitle="Global (période)" />
-              <StatCard title="Montant en attente" value={`${formatMoney(data.global?.validationsPending?.montant)} FCFA`} subtitle="Global (période)" />
+              <StatCard title="Montant en attente" value={`${formatMoney(data.global?.validationsPending?.montant ?? 0)} FCFA`} subtitle="Global (période)" />
             </div>
 
             {Array.isArray(data.global?.demandesByStatut) && data.global.demandesByStatut.length ? (
-              <div className="overflow-auto bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-500 dark:text-gray-400">
-                      <th className="px-4 py-3">Statut</th>
-                      <th className="px-4 py-3">Nb</th>
-                      <th className="px-4 py-3">Montant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.global.demandesByStatut.map((r: ByStatutRow) => (
-                      <tr key={String(r.statut)} className="border-t border-gray-100 dark:border-gray-800">
-                        <td className="px-4 py-3">{String(r.statut)}</td>
-                        <td className="px-4 py-3">{String(r.count ?? 0)}</td>
-                        <td className="px-4 py-3">{formatMoney(r.montant)} FCFA</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ChartCard title="Demandes par statut" subtitle="Nombre de demandes (période)">
+                {(() => {
+                  const rows = data.global?.demandesByStatut || [];
+                  const labels = rows.map((r: ByStatutRow) => String(r.statut));
+                  const series = rows.map((r: ByStatutRow) => Number(r.count || 0));
+
+                  const options: ApexOptions = {
+                    chart: { type: "donut", fontFamily: "Outfit, sans-serif" },
+                    labels,
+                    colors: CHART_COLORS,
+                    legend: { position: "bottom", labels: { colors: "var(--color-gray-500)" } },
+                    stroke: { width: 2, colors: ["transparent"] },
+                    dataLabels: { enabled: true },
+                    tooltip: { y: { formatter: (val: number) => `${val} demande(s)` } },
+                    theme: { mode: isDark ? "dark" : "light" },
+                    plotOptions: {
+                      pie: {
+                        donut: {
+                          size: "70%",
+                          labels: {
+                            show: true,
+                            total: {
+                              show: true,
+                              label: "Total",
+                              formatter: () => String(data.global?.demandes?.count ?? 0),
+                            },
+                          },
+                        },
+                      },
+                    },
+                  };
+
+                  if (!series.some((x: number) => x > 0)) {
+                    return <p className="text-sm text-gray-500 dark:text-gray-400">Aucune donnée sur la période.</p>;
+                  }
+
+                  return <Chart options={options} series={series} type="donut" height={280} />;
+                })()}
+              </ChartCard>
             ) : null}
           </div>
         ) : null}
@@ -224,34 +238,35 @@ export default function Home() {
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Répartition des demandes (période) par rôle du demandeur.</p>
             </div>
 
-            <div className="overflow-auto bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500 dark:text-gray-400">
-                    <th className="px-4 py-3">Profil</th>
-                    <th className="px-4 py-3">Nb demandes</th>
-                    <th className="px-4 py-3">Montant</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.admin.demandesByProfil.length === 0 ? (
-                    <tr>
-                      <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={3}>
-                        Aucune donnée sur la période.
-                      </td>
-                    </tr>
-                  ) : (
-                    data.admin.demandesByProfil.map((r: ByProfilRow) => (
-                      <tr key={String(r.role)} className="border-t border-gray-100 dark:border-gray-800">
-                        <td className="px-4 py-3">{String(r.role)}</td>
-                        <td className="px-4 py-3">{String(r.count ?? 0)}</td>
-                        <td className="px-4 py-3">{formatMoney(r.montant)} FCFA</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ChartCard title="Demandes par profil" subtitle="Nombre de demandes (période)">
+              {(() => {
+                const rows = data.admin?.demandesByProfil || [];
+                const categories = rows.map((r: ByProfilRow) => String(r.role));
+                const seriesData = rows.map((r: ByProfilRow) => Number(r.count || 0));
+
+                const options: ApexOptions = {
+                  chart: { type: "bar", height: 280, fontFamily: "Outfit, sans-serif", toolbar: { show: false } },
+                  theme: { mode: isDark ? "dark" : "light" },
+                  colors: ["var(--color-brand-500)"],
+                  plotOptions: { bar: { borderRadius: 10, columnWidth: "45%" } },
+                  dataLabels: { enabled: true },
+                  xaxis: {
+                    categories,
+                    axisBorder: { show: false },
+                    axisTicks: { show: false },
+                    labels: { style: { colors: "var(--color-gray-500)" } },
+                  },
+                  yaxis: { labels: { style: { colors: "var(--color-gray-500)" } } },
+                  grid: { borderColor: "var(--color-gray-200)" },
+                };
+
+                if (!seriesData.some((x: number) => x > 0)) {
+                  return <p className="text-sm text-gray-500 dark:text-gray-400">Aucune donnée sur la période.</p>;
+                }
+
+                return <Chart options={options} series={[{ name: "Demandes", data: seriesData }]} type="bar" height={280} />;
+              })()}
+            </ChartCard>
           </div>
         ) : null}
 
@@ -260,7 +275,7 @@ export default function Home() {
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <StatCard title="Mes demandes (période)" value={String(data.demandeur?.total?.count ?? 0)} />
-              <StatCard title="Montant total (période)" value={`${formatMoney(data.demandeur?.total?.montant)} FCFA`} />
+              <StatCard title="Montant total (période)" value={`${formatMoney(data.demandeur?.total?.montant ?? 0)} FCFA`} />
               <StatCard title="Statuts" value={String((data.demandeur?.demandesByStatut || []).length)} subtitle="Nb statuts dans la période" />
             </div>
 
@@ -356,29 +371,6 @@ export default function Home() {
               </ChartCard>
             </div>
 
-            <div className="p-5 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Répartition par statut</h2>
-              <div className="mt-3 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-500 dark:text-gray-400">
-                      <th className="py-2">Statut</th>
-                      <th className="py-2">#</th>
-                      <th className="py-2">Montant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.demandeur?.demandesByStatut || []).map((r: ByStatutRow) => (
-                      <tr key={String(r.statut)} className="border-t border-gray-100 dark:border-gray-800">
-                        <td className="py-2">{r.statut}</td>
-                        <td className="py-2">{r.count}</td>
-                        <td className="py-2">{formatMoney(r.montant)} FCFA</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         ) : null}
 
@@ -387,7 +379,7 @@ export default function Home() {
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <StatCard title="Validations en attente" value={String(data.validator.pending.count ?? 0)} />
-              <StatCard title="Montant en attente" value={`${formatMoney(data.validator.pending.montant)} FCFA`} />
+              <StatCard title="Montant en attente" value={`${formatMoney(data.validator?.pending?.montant ?? 0)} FCFA`} />
               <StatCard
                 title="Vieillissement"
                 value={`${data.validator.pending.aging?.["0_2"] ?? 0} / ${data.validator.pending.aging?.["3_7"] ?? 0} / ${data.validator.pending.aging?.["8_plus"] ?? 0}`}
@@ -436,7 +428,7 @@ export default function Home() {
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <StatCard title="Demandes payables" value={String(data.compta.payable?.count ?? 0)} />
-              <StatCard title="Montant payable" value={`${formatMoney(data.compta.payable?.montant)} FCFA`} />
+              <StatCard title="Montant payable" value={`${formatMoney(data.compta?.payable?.montant ?? 0)} FCFA`} />
               <StatCard
                 title="Exceptions"
                 value={`${data.compta.exceptions?.payeSansReception ?? 0} / ${data.compta.exceptions?.receptionSansPaiement ?? 0}`}
@@ -480,29 +472,6 @@ export default function Home() {
               })()}
             </ChartCard>
 
-            <div className="p-5 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Paiements par moyen (période)</h2>
-              <div className="mt-3 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-500 dark:text-gray-400">
-                      <th className="py-2">Moyen</th>
-                      <th className="py-2">#</th>
-                      <th className="py-2">Montant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.compta?.paiementsByMoyen || []).map((r: ByMoyenRow) => (
-                      <tr key={String(r.moyen_paiement || r.moyen)} className="border-t border-gray-100 dark:border-gray-800">
-                        <td className="py-2">{String(r.moyen_paiement || r.moyen)}</td>
-                        <td className="py-2">{String(r.count ?? 0)}</td>
-                        <td className="py-2">{formatMoney(r.montant)} FCFA</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         ) : null}
 
@@ -511,8 +480,8 @@ export default function Home() {
           <div className="space-y-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <StatCard title="Demandes créées (période)" value={String(data.exec.demandes?.count ?? 0)} />
-              <StatCard title="Montant demandes (période)" value={`${formatMoney(data.exec.demandes?.montant)} FCFA`} />
-              <StatCard title="Paiements (période)" value={`${formatMoney(data.exec.paiements?.montant)} FCFA`} subtitle={`# ${data.exec.paiements?.count ?? 0}`} />
+              <StatCard title="Montant demandes (période)" value={`${formatMoney(data.exec?.demandes?.montant ?? 0)} FCFA`} />
+              <StatCard title="Paiements (période)" value={`${formatMoney(data.exec?.paiements?.montant ?? 0)} FCFA`} subtitle={`# ${data.exec?.paiements?.count ?? 0}`} />
             </div>
 
             <ChartCard title="Top bénéficiaires" subtitle="Top 10 par montant (période)">
@@ -555,29 +524,6 @@ export default function Home() {
               })()}
             </ChartCard>
 
-            <div className="p-5 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white/90">Top bénéficiaires (période)</h2>
-              <div className="mt-3 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-gray-500 dark:text-gray-400">
-                      <th className="py-2">Bénéficiaire</th>
-                      <th className="py-2">#</th>
-                      <th className="py-2">Montant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data.exec?.topBeneficiaires || []).map((r: TopBeneficiaireRow) => (
-                      <tr key={String(r.beneficiaire)} className="border-t border-gray-100 dark:border-gray-800">
-                        <td className="py-2">{String(r.beneficiaire)}</td>
-                        <td className="py-2">{String(r.count ?? 0)}</td>
-                        <td className="py-2">{formatMoney(r.montant)} FCFA</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         ) : null}
       </div>

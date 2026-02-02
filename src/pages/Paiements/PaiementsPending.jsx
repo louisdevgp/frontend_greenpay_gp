@@ -1,17 +1,21 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FiEye, FiRefreshCw } from "react-icons/fi";
-import { listMyDemandes } from "../../services/demandes.services";
-import CreateDemandeModal from "./CreateDemandeModal";
+import { FiDollarSign, FiEye, FiRefreshCw } from "react-icons/fi";
+import { listAllDemandes } from "../../services/demandes.services";
 import Pagination from "../../components/common/Pagination";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import DatePicker from "../../components/form/date-picker";
-import { useAuth } from "../../context/AuthContext";
-import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
+import CreatePaiementModal from "./CreatePaiementModal";
 
-const STORAGE_KEY = "filters:demandes:my";
+const STORAGE_KEY = "filters:paiements:pending";
+const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement"]);
+
+function isPayableStatus(statut) {
+  return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
+}
 
 function formatDate(input) {
   if (!input) return "";
@@ -21,44 +25,43 @@ function formatDate(input) {
 }
 
 const initialState = {
-  filters: { statut: "", motif: "", dateStart: "", dateEnd: "" },
+  filters: { statut: "", beneficiaire: "", dateStart: "", dateEnd: "" },
   page: 1,
   pageSize: 10,
 };
 
-export default function DemandesMyList() {
-  const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-
+export default function PaiementsPending() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState([]);
   const [filtered, setFiltered] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedDemandeId, setSelectedDemandeId] = useState("");
 
   const [state, setState] = useState(() => {
     const saved = loadPersistedState(STORAGE_KEY);
     return saved ? { ...initialState, ...saved } : initialState;
   });
 
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-
   const fetch = async () => {
     setLoading(true);
     setError("");
     try {
+      const statutParam = state.filters.statut ? state.filters.statut : "approuvee,en_attente_paiement";
       const params = {
         page: state.page,
         pageSize: state.pageSize,
-        ...(state.filters.statut ? { statut: state.filters.statut } : {}),
-        ...(state.filters.motif ? { motif: state.filters.motif } : {}),
+        statut: statutParam,
+        ...(state.filters.beneficiaire ? { beneficiaire: state.filters.beneficiaire } : {}),
         ...(state.filters.dateStart ? { dateStart: state.filters.dateStart } : {}),
         ...(state.filters.dateEnd ? { dateEnd: state.filters.dateEnd } : {}),
       };
 
-      const res = await listMyDemandes(params);
+      const res = await listAllDemandes(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement demandes");
-      setData(res.data || []);
-      setFiltered(res.data || []);
+      const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut));
+      setData(rows);
+      setFiltered(rows);
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
       setData([]);
@@ -73,15 +76,15 @@ export default function DemandesMyList() {
   }, [state.page, state.pageSize, state.filters]);
 
   useEffect(() => {
-    if (state.filters.statut || state.filters.motif || state.filters.dateStart || state.filters.dateEnd) {
-      const filtered = (data || []).filter((d) => {
+    if (state.filters.statut || state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {
+      const rows = (data || []).filter((d) => {
         if (state.filters.statut && String(d.statut).toLowerCase() !== String(state.filters.statut).toLowerCase()) return false;
-        if (state.filters.motif && !String(d.motif || "").toLowerCase().includes(String(state.filters.motif).toLowerCase())) return false;
+        if (state.filters.beneficiaire && !String(d.beneficiaire || "").toLowerCase().includes(String(state.filters.beneficiaire).toLowerCase())) return false;
         if (state.filters.dateStart && new Date(d.created_at) < new Date(parseDateOnlyStart(state.filters.dateStart))) return false;
         if (state.filters.dateEnd && new Date(d.created_at) > new Date(parseDateOnlyEnd(state.filters.dateEnd))) return false;
         return true;
       });
-      setFiltered(filtered);
+      setFiltered(rows);
     } else {
       setFiltered(data || []);
     }
@@ -95,7 +98,7 @@ export default function DemandesMyList() {
 
   const updateFilter = (key, value) => {
     const newFilters = { ...state.filters, [key]: value };
-    const newState = { ...state, filters: newFilters, page: 1 }; // Reset page when filter changes
+    const newState = { ...state, filters: newFilters, page: 1 };
     setState(newState);
     savePersistedState(STORAGE_KEY, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
   };
@@ -106,34 +109,28 @@ export default function DemandesMyList() {
     savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
 
-  const handleCreateSuccess = (newDemande) => {
-    // Optionnel: Ajouter la nouvelle demande à la liste ou simplement rafraîchir
-    fetch();
-  };
-
   const total = filtered.length;
 
-  const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
+  const openCreate = (demandeId = "") => {
+    setSelectedDemandeId(demandeId ? String(demandeId) : "");
+    setCreateOpen(true);
+  };
+
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setSelectedDemandeId("");
+  };
 
   return (
     <div className="space-y-4">
-      <CreateDemandeModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        onCreated={handleCreateSuccess}
-      />
-
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Mes demandes</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Vue: Mes demandes (DEMANDEUR)</p>
-        </div>
+        <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Paiements en attente</h1>
         <div className="flex gap-2">
           <button
-            onClick={() => setCreateModalOpen(true)}
-            className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+            onClick={() => openCreate("")}
+            className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:opacity-90"
           >
-            + Nouvelle demande
+            Nouveau paiement
           </button>
         <button
           onClick={() => window.location.reload()}
@@ -162,20 +159,17 @@ export default function DemandesMyList() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
             >
               <option value="">Tous</option>
-              <option value="draft">Brouillon</option>
               <option value="approuvee">Approuvée</option>
-              <option value="rejete">Rejetée</option>
-              <option value="a_modifier">À modifier</option>
-              <option value="en_cours_validation">En cours de validation</option>
+              <option value="en_attente_paiement">En attente de paiement</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400">Motif</label>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Bénéficiaire</label>
             <input
               type="text"
-              value={state.filters.motif}
-              onChange={(e) => updateFilter("motif", e.target.value)}
+              value={state.filters.beneficiaire}
+              onChange={(e) => updateFilter("beneficiaire", e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
               placeholder="Recherche..."
             />
@@ -219,7 +213,7 @@ export default function DemandesMyList() {
       {loading ? (
         <div className="p-4 text-center">Chargement...</div>
       ) : filtered.length === 0 ? (
-        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande trouvée.</div>
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande à payer.</div>
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -230,6 +224,8 @@ export default function DemandesMyList() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Motif</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Moyen</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
@@ -245,16 +241,29 @@ export default function DemandesMyList() {
                         {labelDemandeStatut(demande.statut)}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.daf_critere4 || "-"}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
-                    <td className="px-4 py-3 text-sm space-x-2">
-                      <Link
-                        to={`/demandes/${demande.uuid}`}
-                        title="Voir"
-                        aria-label="Voir"
-                        className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                      >
-                        <FiEye />
-                      </Link>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openCreate(demande.id)}
+                          title="Payer"
+                          aria-label="Payer"
+                          className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-600 text-white hover:opacity-90"
+                        >
+                          <FiDollarSign />
+                        </button>
+                        <Link
+                          to={`/demandes/${demande.uuid}`}
+                          title="Voir"
+                          aria-label="Voir"
+                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                        >
+                          <FiEye />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -271,6 +280,15 @@ export default function DemandesMyList() {
           />
         </>
       )}
+
+      <CreatePaiementModal
+        open={createOpen}
+        onClose={closeCreate}
+        onCreated={() => {
+          fetch();
+        }}
+        defaultDemandeId={selectedDemandeId}
+      />
     </div>
   );
 }

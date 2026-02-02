@@ -15,4 +15,15 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    // Listen on all interfaces so the dev server is reachable from your LAN
+    host: true,
+    port: 5173,
+    strictPort: true,
+  },
+  preview: {
+    host: true,
+    port: 4173,
+    strictPort: true,
+  },
 });
