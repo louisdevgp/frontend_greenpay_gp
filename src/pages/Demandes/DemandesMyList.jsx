@@ -4,6 +4,7 @@ import { FiEye, FiRefreshCw } from "react-icons/fi";
 import { listMyDemandes } from "../../services/demandes.services";
 import CreateDemandeModal from "./CreateDemandeModal";
 import Pagination from "../../components/common/Pagination";
+import Loader from "../../components/common/Loader";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import DatePicker from "../../components/form/date-picker";
@@ -112,6 +113,10 @@ export default function DemandesMyList() {
   };
 
   const total = filtered.length;
+  const paged = useMemo(() => {
+    const start = (state.page - 1) * state.pageSize;
+    return (filtered || []).slice(start, start + state.pageSize);
+  }, [filtered, state.page, state.pageSize]);
 
   const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
 
@@ -136,10 +141,11 @@ export default function DemandesMyList() {
             + Nouvelle demande
           </button>
         <button
-          onClick={() => window.location.reload()}
+          onClick={fetch}
+          disabled={loading}
           title="Actualiser"
           aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
         >
           <FiRefreshCw />
         </button>
@@ -217,7 +223,9 @@ export default function DemandesMyList() {
       </div>
 
       {loading ? (
-        <div className="p-4 text-center">Chargement...</div>
+        <div className="p-4">
+          <Loader label="Chargement des données..." />
+        </div>
       ) : filtered.length === 0 ? (
         <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande trouvée.</div>
       ) : (
@@ -235,7 +243,7 @@ export default function DemandesMyList() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                {filtered.map((demande) => (
+                  {paged.map((demande) => (
                   <tr key={demande.id}>
                     <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{demande.uuid}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>

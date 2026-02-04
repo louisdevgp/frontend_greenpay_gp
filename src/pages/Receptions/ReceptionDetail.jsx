@@ -4,10 +4,12 @@ import { FiArrowLeft, FiCheckCircle, FiDownload, FiEye, FiRefreshCw, FiUpload, F
 import { getReception, visaDaf, visaDirecteur } from "../../services/receptions.service";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
+import Loader from "../../components/common/Loader";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
 import { Modal } from "../../components/ui/modal";
 import { formatMoney } from "../../utils/formatUtils";
+import { emitToast } from "../../services/toastBus";
 
 function formatDateTime(iso) {
   if (!iso) return "-";
@@ -117,6 +119,7 @@ export default function ReceptionDetail() {
       const res = kind === "directeur" ? await visaDirecteur(reception.id, payload) : await visaDaf(reception.id, payload);
       if (!res?.success) throw new Error(res?.message || "Visa échoué");
       await fetchReception();
+      emitToast({ variant: "success", message: kind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
       if (kind === "daf") {
         const targetUuid = res?.data?.uuid || reception?.uuid || uuid;
         if (targetUuid) {
@@ -124,7 +127,9 @@ export default function ReceptionDetail() {
         }
       }
     } catch (e) {
-      setVisaError(e?.message || "Erreur visa");
+      const msg = e?.message || "Erreur visa";
+      setVisaError(msg);
+      emitToast({ variant: "error", message: msg });
     } finally {
       setVisaLoading(false);
     }
@@ -180,8 +185,11 @@ export default function ReceptionDetail() {
       setUploadFiles([]);
       setUploadTypeAutre("");
       await fetchDocs(reception.id);
+      emitToast({ variant: "success", message: "Documents uploades" });
     } catch (e) {
-      setUploadError(e?.message || "Erreur upload");
+      const msg = e?.message || "Erreur upload";
+      setUploadError(msg);
+      emitToast({ variant: "error", message: msg });
     } finally {
       setUploading(false);
     }
@@ -189,7 +197,10 @@ export default function ReceptionDetail() {
 
   return (
     <div className="space-y-4">
-      <FullscreenLoader show={loading} label="Chargement de la réception..." />
+      <FullscreenLoader
+        show={loading || visaLoading}
+        label={visaLoading ? "Traitement..." : "Chargement de la réception..."}
+      />
 
       <Modal isOpen={visaModalOpen} onClose={closeVisaModal} className="max-w-2xl p-6" showCloseButton={!visaLoading}>
         <div className="text-lg font-semibold text-gray-800 dark:text-white/90">
@@ -302,9 +313,10 @@ export default function ReceptionDetail() {
               ) : null}
               <button
                 onClick={fetchReception}
+                disabled={loading}
                 title="Rafraîchir"
                 aria-label="Rafraîchir"
-                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
               >
                 <FiRefreshCw />
               </button>
@@ -400,11 +412,12 @@ export default function ReceptionDetail() {
               <button
                 type="button"
                 onClick={() => reception?.id && fetchDocs(reception.id)}
-                title="Recharger"
-                aria-label="Recharger"
-                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+                disabled={docsLoading}
+                title={docsLoading ? "Traitement..." : "Recharger"}
+                aria-label={docsLoading ? "Traitement..." : "Recharger"}
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60"
               >
-                <FiRefreshCw />
+                {docsLoading ? <Loader inline size="sm" label="" /> : <FiRefreshCw />}
               </button>
             </div>
 

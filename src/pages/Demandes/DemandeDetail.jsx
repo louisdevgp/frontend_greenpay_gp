@@ -10,6 +10,7 @@ import { downloadFile } from "../../utils/downloadFile";
 import { labelDemandeStatut, labelValidationStepStatus, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { agentDisplayName, validationActorLabel } from "../../utils/validationActors";
+import Loader from "../../components/common/Loader";
 
 const DAF_CRITERE4_LABEL = "Moyen de paiement";
 
@@ -199,33 +200,84 @@ export default function DemandeDetail() {
     return map;
   }, [paiements]);
 
+  const conditionIsPaid = (c) => {
+    if (!c) return false;
+    if (c.paiement_id) return true;
+    const statut = String(c.statut || "").toLowerCase();
+    return ["paye", "payee", "regle", "reglee"].includes(statut);
+  };
+
   const hasConditionsPaiement = conditionsPaiement.length > 0;
   const allConditionsHavePaiement = hasConditionsPaiement
-    ? conditionsPaiement.every((c) => c.paiement_id && paiementsById.has(Number(c.paiement_id)))
+    ? conditionsPaiement.every((c) => conditionIsPaid(c))
     : false;
+  const conditionLabelMap = useMemo(() => {
+    if (!hasConditionsPaiement) return new Map();
+    if (conditionsPaiement.length === 1) {
+      return new Map([[conditionsPaiement[0]?.id, "Paiement total"]]);
+    }
+    const sortedByAmount = [...conditionsPaiement].sort(
+      (a, b) => Number(b?.montant_prevu || 0) - Number(a?.montant_prevu || 0)
+    );
+    const highestId = sortedByAmount[0]?.id;
+    const map = new Map();
+    conditionsPaiement.forEach((c, idx) => {
+      if (conditionsPaiement.length === 2 && highestId != null) {
+        map.set(c.id, c.id === highestId ? "Acompte" : "Solde");
+      } else {
+        map.set(c.id, c.label || `Tranche ${idx + 1}`);
+      }
+    });
+    return map;
+  }, [conditionsPaiement, hasConditionsPaiement]);
+
+  const paidAmountFromConditions = useMemo(() => {
+    if (!hasConditionsPaiement) return 0;
+    return conditionsPaiement.reduce((acc, c) => {
+      if (!conditionIsPaid(c)) return acc;
+      const montant = Number(c.montant_prevu);
+      return acc + (Number.isFinite(montant) ? montant : 0);
+    }, 0);
+  }, [conditionsPaiement, hasConditionsPaiement]);
+
+  const statutIndicatesPaid = useMemo(() => {
+    const statut = String(demande?.statut || "").toLowerCase();
+    return ["paye", "payee", "cloture", "cloturee"].includes(statut);
+  }, [demande?.statut]);
+
+  const paidAmountInfo = useMemo(() => {
+    if (!demande) return 0;
+    const totalNet = Number(demande.montant_net ?? demande.montant) || 0;
+    if (paiementsTotal > 0) return { amount: paiementsTotal, source: "paiements" };
+    if (paidAmountFromConditions > 0) return { amount: paidAmountFromConditions, source: "conditions" };
+    if (statutIndicatesPaid && totalNet > 0) return { amount: totalNet, source: "statut" };
+    return { amount: 0, source: "none" };
+  }, [demande, paiementsTotal, paidAmountFromConditions, statutIndicatesPaid]);
+  const paidAmountEffective = paidAmountInfo.amount;
+  const isPaidAmountEstimated = paidAmountInfo.source !== "paiements" && paidAmountInfo.source !== "none";
 
   const paiementStatus = useMemo(() => {
     if (!demande) return { type: "none", label: "Non applicable" };
+    const totalNet = Number(demande.montant_net ?? demande.montant) || 0;
+    const hasPaiement = paidAmountEffective > 0;
+
+    if (!hasPaiement) {
+      return { type: "none", label: "Non payé" };
+    }
 
     if (hasConditionsPaiement) {
-      if (allConditionsHavePaiement) {
+      if (allConditionsHavePaiement || (totalNet > 0 && paidAmountEffective >= totalNet - 0.01)) {
         return { type: "total", label: "Payé (total)" };
-      } else {
-        return { type: "partial", label: "Payé (partiel)" };
       }
-    } else {
-      // Ancien système sans conditions de paiement
-      if (paiementsTotal > 0) {
-        const totalNet = Number(demande.montant_net ?? demande.montant) || 0;
-        if (Math.abs(paiementsTotal - totalNet) < 0.01) {
-          return { type: "total", label: "Payé (total)" };
-        } else {
-          return { type: "partial", label: "Payé (partiel)" };
-        }
-      }
+      return { type: "partial", label: "Payé (partiel)" };
     }
-    return { type: "none", label: "Non payé" };
-  }, [demande, paiementsTotal, hasConditionsPaiement, allConditionsHavePaiement]);
+
+    // Ancien système sans conditions de paiement
+    if (Math.abs(paidAmountEffective - totalNet) < 0.01) {
+      return { type: "total", label: "Payé (total)" };
+    }
+    return { type: "partial", label: "Payé (partiel)" };
+  }, [demande, paidAmountEffective, hasConditionsPaiement, allConditionsHavePaiement]);
 
   const montantBrut = useMemo(() => {
     if (!demande) return 0;
@@ -332,9 +384,10 @@ export default function DemandeDetail() {
               ) : null}
               <button
                 onClick={fetchDemande}
+                disabled={loading}
                 title="Rafraîchir"
                 aria-label="Rafraîchir"
-                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
               >
                 <FiRefreshCw />
               </button>
@@ -410,7 +463,10 @@ export default function DemandeDetail() {
             </div>
             {paiementStatus.type !== "none" && (
               <div className="mt-2 text-sm">
-                Montant payé: <span className="font-medium">{formatMoney(paiementsTotal)} FCFA</span>
+                Montant payé: <span className="font-medium">{formatMoney(paidAmountEffective)} FCFA</span>
+                {isPaidAmountEstimated && (
+                  <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">(montant estimé)</span>
+                )}
                 {paiementStatus.type === "partial" && (
                   <>
                     {" "}sur {formatMoney(montantNet)} FCFA
@@ -493,18 +549,23 @@ export default function DemandeDetail() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant prévu</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant payé</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Paiement</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                    {conditionsPaiement.map((cond) => {
+                    {conditionsPaiement.map((cond, index) => {
                         const paiement = cond.paiement_id ? paiementsById.get(Number(cond.paiement_id)) : null;
-                        const isPaye = !!paiement;
-                      
+                        const isPaye = conditionIsPaid(cond);
+                        const baseLabel = conditionLabelMap.get(cond.id) || cond.label || `Tranche ${index + 1}`;
+                        const pourcentageLabel =
+                          cond.pourcentage != null && String(cond.pourcentage).trim() !== ""
+                            ? `${formatMoney(cond.pourcentage)}%`
+                            : "";
+                        const fullLabel = pourcentageLabel ? `${baseLabel} ${pourcentageLabel}` : baseLabel;
+
                       return (
                         <tr key={cond.id}>
                           <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
-                            {cond.label} {cond.pourcentage ? `(${formatMoney(cond.pourcentage)}%)` : ""}
+                            {fullLabel}
                             {cond.condition_texte ? ` - ${cond.condition_texte}` : ""}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
@@ -520,24 +581,11 @@ export default function DemandeDetail() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
-                            {paiement?.montant != null ? `${formatMoney(paiement.montant)} FCFA` : "-"}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
-                            {paiement ? (
-                              <div className="flex items-center gap-2">
-                                <div className="text-sm text-gray-800 dark:text-white/90">
-                                  {paiement.moyen_paiement || "Paiement"}
-                                </div>
-                                <Link 
-                                  to={`/paiements/${paiement.uuid}`}
-                                  title="Voir le paiement"
-                                  aria-label="Voir le paiement"
-                                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                                >
-                                  <FiEye />
-                                </Link>
-                              </div>
-                            ) : "-"}
+                            {paiement?.montant != null
+                              ? `${formatMoney(paiement.montant)} FCFA`
+                              : isPaye && cond.montant_prevu != null
+                                ? `${formatMoney(cond.montant_prevu)} FCFA`
+                                : "-"}
                           </td>
                         </tr>
                       );
@@ -650,11 +698,12 @@ export default function DemandeDetail() {
               <button
                 type="button"
                 onClick={() => demande?.id && fetchDocs(demande.id)}
-                title="Recharger"
-                aria-label="Recharger"
-                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+                disabled={docsLoading}
+                title={docsLoading ? "Traitement..." : "Recharger"}
+                aria-label={docsLoading ? "Traitement..." : "Recharger"}
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60"
               >
-                <FiRefreshCw />
+                {docsLoading ? <Loader inline size="sm" label="" /> : <FiRefreshCw />}
               </button>
             </div>
 
@@ -764,3 +813,4 @@ function Info({ label, value }) {
     </div>
   );
 }
+

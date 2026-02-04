@@ -1,5 +1,3 @@
-import Swal from "sweetalert2";
-
 export type ToastVariant = "success" | "error" | "warning" | "info";
 
 export type ToastEventPayload = {
@@ -9,29 +7,27 @@ export type ToastEventPayload = {
   timeoutMs?: number;
 };
 
-export function emitToast(payload: ToastEventPayload) {
-  const iconMap: Record<ToastVariant, "success" | "error" | "warning" | "info"> = {
-    success: "success",
-    error: "error",
-    warning: "warning",
-    info: "info",
-  };
+export const TOAST_EVENT = "gp-toast";
 
-  const icon = iconMap[payload.variant] || "info";
-  const timer = typeof payload.timeoutMs === "number" ? payload.timeoutMs : 4500;
-  const isBlocking = payload.variant === "error" || payload.variant === "warning";
+type LegacyArgs = [string, ToastVariant?];
 
-  Swal.fire({
-    icon,
-    title: payload.title || undefined,
-    text: payload.message,
-    position: "top-end", // Meilleure visibilité
-    timer: isBlocking ? undefined : timer,
-    timerProgressBar: !isBlocking,
-    showConfirmButton: isBlocking,
-    confirmButtonText: "OK",
-    customClass: {
-      popup: "z-[9999]", // Z-index élevé pour être au-dessus des modales
-    },
-  });
+function normalizePayload(
+  payloadOrMessage: ToastEventPayload | string,
+  legacyVariant?: ToastVariant
+): ToastEventPayload {
+  if (typeof payloadOrMessage === "string") {
+    return {
+      variant: legacyVariant || "info",
+      message: payloadOrMessage,
+    };
+  }
+  return payloadOrMessage;
+}
+
+export function emitToast(payload: ToastEventPayload): void;
+export function emitToast(message: string, variant?: ToastVariant): void;
+export function emitToast(payloadOrMessage: ToastEventPayload | string, ...rest: LegacyArgs) {
+  const payload = normalizePayload(payloadOrMessage, rest[0]);
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(TOAST_EVENT, { detail: payload }));
 }

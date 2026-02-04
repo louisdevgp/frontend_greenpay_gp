@@ -5,6 +5,7 @@ import { emitToast } from "../../services/toastBus";
 import { formatMoney } from "../../utils/formatUtils";
 import { useDropzone } from "react-dropzone";
 import { uploadManyDocuments } from "../../services/documents.service";
+import FullscreenLoader from "../../components/common/FullScreenLoader";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -300,6 +301,7 @@ export default function CreateDemande() {
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
+      <FullscreenLoader show={loading || uploadingDocs} label="Traitement..." />
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">Créer une demande</h1>
         <p className="text-gray-600 dark:text-gray-400">Remplissez les détails de votre demande.</p>
@@ -717,7 +719,7 @@ export default function CreateDemande() {
             disabled={loading || uploadingDocs}
             className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
           >
-            {loading || uploadingDocs ? "Création..." : "Créer la demande"}
+            {loading || uploadingDocs ? "Traitement..." : "Créer la demande"}
           </button>
         </div>
       </form>

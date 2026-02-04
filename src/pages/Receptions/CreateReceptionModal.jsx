@@ -3,6 +3,8 @@ import { createReception } from "../../services/receptions.service";
 import { uploadManyDocuments } from "../../services/documents.service";
 import { Modal } from "../../components/ui/modal";
 import DatePicker from "../../components/form/date-picker";
+import FullscreenLoader from "../../components/common/FullScreenLoader";
+import { emitToast } from "../../services/toastBus";
 
 export default function CreateReceptionModal({ open, paiement, demande, onClose, onCreated }) {
     const [submitting, setSubmitting] = useState(false);
@@ -80,7 +82,11 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
         setError("");
 
         const msg = validate();
-        if (msg) return setError(msg);
+        if (msg) {
+            setError(msg);
+            emitToast({ variant: "error", message: msg });
+            return;
+        }
 
         try {
             setSubmitting(true);
@@ -114,10 +120,16 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                 });
             }
 
+            emitToast({ variant: "success", message: "Reception creee" });
+            setSubmitting(false);
             onCreated?.();
             close();
         } catch (err) {
-            setError(err?.message || "Erreur inconnue");
+            const msg = err?.message || "Erreur inconnue";
+            setError(msg);
+            emitToast({ variant: "error", message: msg });
+            setSubmitting(false);
+        } finally {
             setSubmitting(false);
         }
     };
@@ -134,6 +146,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
             showCloseButton={false}
             className="w-full max-w-3xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
         >
+            <FullscreenLoader show={submitting} label="Traitement..." />
                 <div className="flex items-start justify-between gap-3">
                     <div>
                         <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Nouvelle réception</h2>

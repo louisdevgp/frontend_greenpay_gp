@@ -2,6 +2,8 @@ import React, { useMemo, useState } from "react";
 import { FiCheckCircle, FiCornerUpLeft, FiX, FiXCircle } from "react-icons/fi";
 import { approveValidation, rejectValidation, returnValidationForModification } from "../../services/validations.service";
 import { Modal } from "../../components/ui/modal";
+import FullscreenLoader from "../../components/common/FullScreenLoader";
+import { emitToast } from "../../services/toastBus";
 
 const DAF_CRITERE4_LABEL = import.meta.env.VITE_DAF_CRITERE4_LABEL || "Moyen de paiement";
 
@@ -99,10 +101,21 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
             : await returnValidationForModification(id, { commentaire: commentaireTrimmed });
 
       if (!res?.success) throw new Error(res?.message || "Action échouée");
+      emitToast({
+        variant: "success",
+        message:
+          mode === "approve"
+            ? "Validation effectuée"
+            : mode === "reject"
+              ? "Demande rejetée"
+              : "Demande retournée pour modification",
+      });
       onDone?.();
       close();
     } catch (err) {
-      setError(err?.message || "Erreur inconnue");
+      const msg = err?.message || "Erreur inconnue";
+      setError(msg);
+      emitToast({ variant: "error", message: msg });
     } finally {
       setSubmitting(false);
     }
@@ -117,6 +130,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       showCloseButton={false}
       className="w-full max-w-xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
     >
+        <FullscreenLoader show={submitting} label="Traitement..." />
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">{title}</h2>

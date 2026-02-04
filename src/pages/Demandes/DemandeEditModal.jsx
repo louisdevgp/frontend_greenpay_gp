@@ -3,6 +3,7 @@ import { updateDemande } from "../../services/demandes.services";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import FullscreenLoader from "../../components/common/FullScreenLoader";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -223,6 +224,7 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
       showCloseButton={false}
       className="w-full max-w-4xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
     >
+      <FullscreenLoader show={loading} label="Traitement..." />
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Modifier la demande</h2>
@@ -487,7 +489,7 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
             disabled={loading}
             className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
           >
-            {loading ? "Mise à jour..." : "Enregistrer"}
+            {loading ? "Traitement..." : "Enregistrer"}
           </button>
         </div>
       </form>

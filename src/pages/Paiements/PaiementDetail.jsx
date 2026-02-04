@@ -110,9 +110,10 @@ export default function PaiementDetail() {
               ) : null}
               <button
                 onClick={fetchPaiement}
+                disabled={loading}
                 title="Rafraîchir"
                 aria-label="Rafraîchir"
-                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
               >
                 <FiRefreshCw />
               </button>

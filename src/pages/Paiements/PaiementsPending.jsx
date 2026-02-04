@@ -1,8 +1,9 @@
-ï»¿import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiDollarSign, FiEye, FiRefreshCw } from "react-icons/fi";
 import { listAllDemandes } from "../../services/demandes.services";
 import Pagination from "../../components/common/Pagination";
+import Loader from "../../components/common/Loader";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import DatePicker from "../../components/form/date-picker";
@@ -110,6 +111,10 @@ export default function PaiementsPending() {
   };
 
   const total = filtered.length;
+  const paged = useMemo(() => {
+    const start = (state.page - 1) * state.pageSize;
+    return (filtered || []).slice(start, start + state.pageSize);
+  }, [filtered, state.page, state.pageSize]);
 
   const openCreate = (demandeId = "") => {
     setSelectedDemandeId(demandeId ? String(demandeId) : "");
@@ -133,10 +138,11 @@ export default function PaiementsPending() {
             Nouveau paiement
           </button>
         <button
-          onClick={() => window.location.reload()}
+          onClick={fetch}
+          disabled={loading}
           title="Actualiser"
           aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
         >
           <FiRefreshCw />
         </button>
@@ -159,13 +165,13 @@ export default function PaiementsPending() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
             >
               <option value="">Tous</option>
-              <option value="approuvee">ApprouvÃ©e</option>
+              <option value="approuvee">Approuvée</option>
               <option value="en_attente_paiement">En attente de paiement</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400">BÃ©nÃ©ficiaire</label>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Bénéficiaire</label>
             <input
               type="text"
               value={state.filters.beneficiaire}
@@ -199,7 +205,7 @@ export default function PaiementsPending() {
             onClick={resetFilters}
             className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            RÃ©initialiser
+            Réinitialiser
           </button>
           <button
             onClick={clearPersistedState.bind(null, STORAGE_KEY)}
@@ -211,9 +217,11 @@ export default function PaiementsPending() {
       </div>
 
       {loading ? (
-        <div className="p-4 text-center">Chargement...</div>
+        <div className="p-4">
+          <Loader label="Chargement des donnees..." />
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande Ã  payer.</div>
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande à payer.</div>
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -225,13 +233,13 @@ export default function PaiementsPending() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Moyen</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">BÃ©nÃ©ficiaire</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">CrÃ©Ã©</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                {filtered.map((demande) => (
+                {paged.map((demande) => (
                   <tr key={demande.id}>
                     <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{demande.uuid}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>

@@ -4,6 +4,7 @@ import { FiCheckCircle, FiCornerUpLeft, FiEye, FiRefreshCw, FiXCircle } from "re
 import { listValidationsPending } from "../../services/validations.service";
 import ValidationActionModal from "./ValidationActionModal";
 import Pagination from "../../components/common/Pagination";
+import Loader from "../../components/common/Loader";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { labelValidationStepStatus } from "../../utils/statusLabels";
 import { useAuth } from "../../context/AuthContext";
@@ -105,6 +106,10 @@ export default function ValidationsPending() {
   };
 
   const total = filtered.length;
+  const paged = useMemo(() => {
+    const start = (state.page - 1) * state.pageSize;
+    return (filtered || []).slice(start, start + state.pageSize);
+  }, [filtered, state.page, state.pageSize]);
 
   const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
 
@@ -121,10 +126,11 @@ export default function ValidationsPending() {
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Validations en attente</h1>
         <button
-          onClick={() => window.location.reload()}
+          onClick={fetch}
+          disabled={loading}
           title="Actualiser"
           aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
         >
           <FiRefreshCw />
         </button>
@@ -179,7 +185,9 @@ export default function ValidationsPending() {
       </div>
 
       {loading ? (
-        <div className="p-4 text-center">Chargement...</div>
+        <div className="p-4">
+          <Loader label="Chargement des données..." />
+        </div>
       ) : filtered.length === 0 ? (
         <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune validation en attente.</div>
       ) : (
@@ -199,7 +207,7 @@ export default function ValidationsPending() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                {filtered.map((validation) => {
+                {paged.map((validation) => {
                   const demande = pickDemande(validation);
                   return (
                     <tr key={validation.id}>

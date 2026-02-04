@@ -6,6 +6,8 @@ import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
 import { formatMoney } from "../../utils/formatUtils";
 import { uploadManyDocuments } from "../../services/documents.service";
+import FullscreenLoader from "../../components/common/FullScreenLoader";
+import Loader from "../../components/common/Loader";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -244,6 +246,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
       showCloseButton={false}
       className="w-full max-w-2xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
     >
+      <FullscreenLoader show={loading} label="Traitement..." />
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Créer un paiement</h2>
@@ -420,11 +423,11 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
           <button
             type="submit"
             disabled={loading}
-            title={loading ? "Création..." : "Créer"}
-            aria-label={loading ? "Création..." : "Créer"}
+            title={loading ? "Traitement..." : "Créer"}
+            aria-label={loading ? "Traitement..." : "Créer"}
             className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
           >
-            <FiCheckCircle />
+            {loading ? <Loader inline size="sm" label="Traitement..." /> : <FiCheckCircle />}
           </button>
         </div>
       </form>

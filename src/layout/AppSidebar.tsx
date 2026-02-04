@@ -188,7 +188,6 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
         { name: "Délégations", path: "/admin/delegations" },
       ],
     },
-    { section: "main", icon: <PageIcon />, name: "Demandes", path: "/demandes/all" },
   ],
 };
 
