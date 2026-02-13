@@ -57,9 +57,14 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
       name: "Mes demandes",
       subItems: [
         { name: "Mes demandes", path: "/demandes/my" },
-        { name: "Demandes (périmètre)", path: "/demandes/all" },
         { name: "Nouvelle demande", path: "/demandes/create", new: true },
       ],
+    },
+    {
+      section: "main",
+      icon: <TableIcon />,
+      name: "RÃ©ceptions",
+      subItems: [{ name: "Mes rÃ©ceptions", path: "/receptions" }],
     },
     { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
   ],
@@ -71,16 +76,6 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
 
   RESPONSABLE: [
     { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <PageIcon />,
-      name: "Mes demandes",
-      subItems: [
-        { name: "Mes demandes", path: "/demandes/my" },
-        { name: "Demandes (périmètre)", path: "/demandes/all" },
-        { name: "Nouvelle demande", path: "/demandes/create", new: true },
-      ],
-    },
     {
       section: "main",
       icon: <ListIcon />,
@@ -95,6 +90,7 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   DIRECTEUR: [
+    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
     {
       section: "main",
       icon: <ListIcon />,
@@ -112,6 +108,7 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   DAF: [
+    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
     {
       section: "main",
       icon: <ListIcon />,
@@ -147,6 +144,7 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   DG: [
+    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
     {
       section: "main",
       icon: <ListIcon />,
@@ -160,6 +158,7 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   DGA: [
+    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
     {
       section: "main",
       icon: <ListIcon />,
@@ -173,6 +172,7 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
   ],
 
   ADMIN: [
+    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
     {
       section: "main",
       icon: <BoxCubeIcon />,
@@ -247,23 +247,17 @@ function mergeMenus(a: MenuItem[] = [], b: MenuItem[] = []): MenuItem[] {
   return Array.from(map.values());
 }
 
+const BASE_MENU: MenuItem[] = [{ section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" }];
+
 /**
- * Règle métier :
- * - base_role = DEMANDEUR (toujours)
- * - dedicated_role = user.roles[0] (si existe)
- * - + rôles délégués = user.agent.delegations[].role_name (si existe)
+ * Menus = union des rôles effectifs (multi-profils + délégations).
  */
-function buildMenu(dedicated: Role | null, delegated: Role[] = []): MenuItem[] {
-  let menu: MenuItem[] = MENUS_BY_ROLE.DEMANDEUR;
+function buildMenu(roles: Role[] = []): MenuItem[] {
+  let menu: MenuItem[] = [...BASE_MENU];
+  const uniq = Array.from(new Set(roles.filter(Boolean)));
 
-  if (dedicated && dedicated !== "DEMANDEUR") {
-    menu = mergeMenus(menu, MENUS_BY_ROLE[dedicated] ?? []);
-  }
-
-  delegated.forEach((r) => {
-    if (r && r !== "DEMANDEUR") {
-      menu = mergeMenus(menu, MENUS_BY_ROLE[r] ?? []);
-    }
+  uniq.forEach((r) => {
+    menu = mergeMenus(menu, MENUS_BY_ROLE[r] ?? []);
   });
 
   return menu;
@@ -280,20 +274,20 @@ export default function AppSidebar() {
   );
   const hasPermission = useCallback((code: string) => userPermissions.includes(code), [userPermissions]);
 
-  // ✅ user.roles ex: ["COMPTABLE"]
-  const dedicatedRole = useMemo(() => normalizeRole(user?.roles?.[0]) ?? null, [user?.roles]);
-
-  // ✅ compat délégations (si tu ajoutes plus tard)
-  const delegatedRoles = useMemo(() => {
-    const raw = user?.agent?.delegations ?? [];
-    return raw
+  const effectiveRoles = useMemo(() => {
+    const base = Array.isArray(user?.roles) ? user.roles : [];
+    const delegated = (user?.agent?.delegations ?? [])
       .map((d) => normalizeRole(d?.role_name))
       .filter((x): x is Role => Boolean(x));
-  }, [user?.agent?.delegations]);
+    const normalized = base
+      .map((r) => normalizeRole(r))
+      .filter((x): x is Role => Boolean(x));
+    return Array.from(new Set([...normalized, ...delegated]));
+  }, [user?.roles, user?.agent?.delegations]);
 
   const computedMenu = useMemo(() => {
     // base menu from roles/delgations
-    let out = buildMenu(dedicatedRole, delegatedRoles);
+    let out = buildMenu(effectiveRoles);
 
     // remove old role-based admin menu (we re-add it based on permissions)
     out = out.filter((x) => String(x?.name || "").toLowerCase() !== "administration");
@@ -315,7 +309,7 @@ export default function AppSidebar() {
     }
 
     return out;
-  }, [dedicatedRole, delegatedRoles, hasPermission]);
+  }, [effectiveRoles, hasPermission]);
 
   const navItems = useMemo(
     () => computedMenu.filter((x) => (x.section ?? "main") === "main"),
