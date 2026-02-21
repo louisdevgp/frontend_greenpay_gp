@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { FiArrowLeft, FiCheckCircle, FiDownload, FiEye, FiRefreshCw, FiUpload, FiX } from "react-icons/fi";
 import { getReception, visaDaf, visaDirecteur } from "../../services/receptions.service";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
+import LoadingButton from "../../components/common/LoadingButton";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
 import { Modal } from "../../components/ui/modal";
@@ -62,6 +63,18 @@ export default function ReceptionDetail() {
   const [uploadType, setUploadType] = useState("bl");
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
+  const [downloadState, setDownloadState] = useState({});
+
+  const isDownloading = (key) => !!downloadState[key];
+  const runDownload = async (key, fn) => {
+    if (isDownloading(key)) return;
+    setDownloadState((prev) => ({ ...prev, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setDownloadState((prev) => ({ ...prev, [key]: false }));
+    }
+  };
 
   const [visaLoading, setVisaLoading] = useState(false);
   const [visaError, setVisaError] = useState("");
@@ -287,15 +300,20 @@ export default function ReceptionDetail() {
               </button>
               {canDownloadPdf ? (
                 <>
-                  <button
+                  <LoadingButton
                     type="button"
-                    onClick={() => downloadFile(`/receptions/${reception.uuid || uuid}/pdf`, `reception_${reception.uuid || uuid}.pdf`)}
+                    onClick={() =>
+                      runDownload("reception-pdf", () =>
+                        downloadFile(`/receptions/${reception.uuid || uuid}/pdf`, `reception_${reception.uuid || uuid}.pdf`)
+                      )
+                    }
+                    loading={isDownloading("reception-pdf")}
                     title="Télécharger PDF"
                     aria-label="Télécharger PDF"
                     className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                   >
-                    <FiDownload />
-                  </button>
+                    {isDownloading("reception-pdf") ? null : <FiDownload />}
+                  </LoadingButton>
                   <button
                     type="button"
                     onClick={() =>

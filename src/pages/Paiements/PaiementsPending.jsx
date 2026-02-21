@@ -1,21 +1,37 @@
-import React, { useEffect, useMemo, useState } from "react";
+Ôªøimport React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiDollarSign, FiEye, FiRefreshCw } from "react-icons/fi";
 import { listAllDemandes } from "../../services/demandes.services";
 import Pagination from "../../components/common/Pagination";
 import Loader from "../../components/common/Loader";
+import ExportButton from "../../components/common/ExportButton";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import DatePicker from "../../components/form/date-picker";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { exportRowsToExcel } from "../../utils/excelExport";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import CreatePaiementModal from "./CreatePaiementModal";
 
 const STORAGE_KEY = "filters:paiements:pending";
-const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement"]);
+const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "receptionnee"]);
+const PAID_CONDITION_STATUSES = new Set(["paye", "payee", "regle", "reglee"]);
 
 function isPayableStatus(statut) {
   return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
+}
+
+function isConditionPaid(condition) {
+  if (!condition) return false;
+  if (condition.paiement_id) return true;
+  const statusKey = String(condition.statut || "").toLowerCase();
+  return PAID_CONDITION_STATUSES.has(statusKey);
+}
+
+function isFullyPaid(demande) {
+  const conditions = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
+  if (!conditions.length) return false;
+  return conditions.every(isConditionPaid);
 }
 
 function formatDate(input) {
@@ -48,7 +64,7 @@ export default function PaiementsPending() {
     setLoading(true);
     setError("");
     try {
-      const statutParam = state.filters.statut ? state.filters.statut : "approuvee,en_attente_paiement";
+      const statutParam = state.filters.statut ? state.filters.statut : "approuvee,en_attente_paiement,receptionnee";
       const params = {
         page: state.page,
         pageSize: state.pageSize,
@@ -60,7 +76,7 @@ export default function PaiementsPending() {
 
       const res = await listAllDemandes(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement demandes");
-      const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut));
+      const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut) && !isFullyPaid(d));
       setData(rows);
       setFiltered(rows);
     } catch (e) {
@@ -116,6 +132,25 @@ export default function PaiementsPending() {
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
+  const exportColumns = [
+    { header: "UUID", key: "uuid" },
+    { header: "Motif", key: "motif" },
+    { header: "Montant", value: (d) => `${formatMoney(d.montant_net ?? d.montant)} FCFA` },
+    { header: "Statut", value: (d) => labelDemandeStatut(d.statut) },
+    { header: "Moyen", value: (d) => d?.daf_critere4 || "-" },
+    { header: "B√©n√©ficiaire", value: (d) => d?.beneficiaire || "-" },
+    { header: "Cr√©√©", value: (d) => formatDateTime(d.created_at) },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows: filtered,
+      columns: exportColumns,
+      filename: `paiements_en_attente_${dateTag}.xlsx`,
+      sheetName: "Demandes",
+    });
+  };
+
   const openCreate = (demandeId = "") => {
     setSelectedDemandeId(demandeId ? String(demandeId) : "");
     setCreateOpen(true);
@@ -137,15 +172,20 @@ export default function PaiementsPending() {
           >
             Nouveau paiement
           </button>
-        <button
-          onClick={fetch}
-          disabled={loading}
-          title="Actualiser"
-          aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
-        >
-          <FiRefreshCw />
-        </button>
+          <ExportButton
+            onExport={handleExport}
+            disabled={!filtered.length}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+          />
+          <button
+            onClick={fetch}
+            disabled={loading}
+            title="Actualiser"
+            aria-label="Actualiser"
+            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
+          >
+            <FiRefreshCw />
+          </button>
         </div>
       </div>
 
@@ -165,13 +205,14 @@ export default function PaiementsPending() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
             >
               <option value="">Tous</option>
-              <option value="approuvee">ApprouvÈe</option>
+              <option value="approuvee">Approuv√©e</option>
               <option value="en_attente_paiement">En attente de paiement</option>
+              <option value="receptionnee">R√©ceptionn√©e</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400">BÈnÈficiaire</label>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">B√©n√©ficiaire</label>
             <input
               type="text"
               value={state.filters.beneficiaire}
@@ -205,7 +246,7 @@ export default function PaiementsPending() {
             onClick={resetFilters}
             className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            RÈinitialiser
+            R√©initialiser
           </button>
           <button
             onClick={clearPersistedState.bind(null, STORAGE_KEY)}
@@ -221,7 +262,7 @@ export default function PaiementsPending() {
           <Loader label="Chargement des donnees..." />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande ‡ payer.</div>
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande √† payer.</div>
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -233,8 +274,8 @@ export default function PaiementsPending() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Moyen</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">BÈnÈficiaire</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">CrÈÈ</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">B√©n√©ficiaire</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Cr√©√©</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
@@ -300,3 +341,7 @@ export default function PaiementsPending() {
     </div>
   );
 }
+
+
+
+

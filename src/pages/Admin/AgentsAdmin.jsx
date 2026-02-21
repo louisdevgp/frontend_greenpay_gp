@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
+import ExportButton from "../../components/common/ExportButton";
 import { emitToast } from "../../services/toastBus";
 import { createAgent, listAgents, setAgentManager, softDeleteAgent, updateAgent } from "../../services/agents.admin.service";
 import { listUsers } from "../../services/users.admin.service";
@@ -10,6 +11,7 @@ import { listRoles } from "../../services/roles.service";
 import { listDirections } from "../../services/directions.service";
 import { listDepartements } from "../../services/departements.service";
 import { listServices } from "../../services/services.service";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 export default function AgentsAdmin() {
   const [loading, setLoading] = useState(true);
@@ -72,6 +74,21 @@ export default function AgentsAdmin() {
     } finally {
       setLoading(false);
     }
+  };
+  const exportColumns = [
+    { header: "Agent", value: (a) => `${a?.nom || ""} ${a?.prenom || ""}`.trim() || "-" },
+    { header: "Email", value: (a) => a?.users?.email || "-" },
+    { header: "Rôle", value: (a) => a?.roles?.name || "-" },
+    { header: "Manager", value: (a) => (a?.agents ? `${a.agents.nom} ${a.agents.prenom}` : "-") },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows: agents,
+      columns: exportColumns,
+      filename: `agents_${dateTag}.xlsx`,
+      sheetName: "Agents",
+    });
   };
 
   useEffect(() => {
@@ -194,7 +211,12 @@ export default function AgentsAdmin() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Gestion des agents et manager actuel.</p>
         </div>
 
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-end gap-2">
+          <ExportButton
+            onExport={handleExport}
+            disabled={!agents.length}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+          />
           <button
             onClick={openCreate}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
@@ -202,7 +224,6 @@ export default function AgentsAdmin() {
             Nouveau
           </button>
         </div>
-
         {error ? (
           <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
             {error}
@@ -469,3 +490,5 @@ export default function AgentsAdmin() {
     </>
   );
 }
+
+

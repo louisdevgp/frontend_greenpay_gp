@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
+import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { emitToast } from "../../services/toastBus";
 import { listAgents, setAgentManager } from "../../services/agents.admin.service";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 export default function HierarchyAdmin() {
   const [loading, setLoading] = useState(true);
@@ -44,6 +46,21 @@ export default function HierarchyAdmin() {
     setManagerId(selectedAgent?.agents?.id ? String(selectedAgent.agents.id) : "");
   }, [selectedAgent]);
 
+  const exportColumns = [
+    { header: "Agent", value: (a) => `${a?.nom || ""} ${a?.prenom || ""}`.trim() || "-" },
+    { header: "Rôle", value: (a) => a?.roles?.name || "-" },
+    { header: "Manager", value: (a) => (a?.agents ? `${a.agents.nom} ${a.agents.prenom}` : "-") },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows: agents,
+      columns: exportColumns,
+      filename: `hierarchie_${dateTag}.xlsx`,
+      sheetName: "Hierarchie",
+    });
+  };
+
   const save = async () => {
     if (!agentId) return;
     setSaving(true);
@@ -69,6 +86,13 @@ export default function HierarchyAdmin() {
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white/90">Hiérarchie</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Définir le manager actuel d’un agent.</p>
         </div>
+
+        <div className="flex justify-end">
+                    <ExportButton
+            onExport={handleExport}
+            disabled={!agents.length}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+          />        </div>
 
         {error ? (
           <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
@@ -157,3 +181,6 @@ export default function HierarchyAdmin() {
     </>
   );
 }
+
+
+

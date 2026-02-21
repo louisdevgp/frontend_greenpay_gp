@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
+import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
 import { listDepartements } from "../../services/departements.service";
 import { createService, deleteService, listServices, updateService } from "../../services/services.service";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 export default function ServicesAdmin() {
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,22 @@ export default function ServicesAdmin() {
   }, [departementFilter]);
 
   const departementOptions = useMemo(() => departements || [], [departements]);
+
+  const exportColumns = [
+    { header: "Nom", value: (r) => r?.nom || "-" },
+    { header: "Code", value: (r) => r?.code || "-" },
+    { header: "Département", value: (r) => r?.departements?.nom || "-" },
+    { header: "Direction", value: (r) => r?.departements?.directions?.nom || "-" },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows,
+      columns: exportColumns,
+      filename: `services_${dateTag}.xlsx`,
+      sheetName: "Services",
+    });
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -141,7 +159,11 @@ export default function ServicesAdmin() {
                 ))}
               </select>
             </div>
-            <button
+                        <ExportButton
+              onExport={handleExport}
+              disabled={!rows.length}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+            />            <button
               onClick={openCreate}
               className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
             >
@@ -274,3 +296,6 @@ export default function ServicesAdmin() {
     </>
   );
 }
+
+
+

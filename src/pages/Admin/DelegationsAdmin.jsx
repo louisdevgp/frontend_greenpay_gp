@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
+import ExportButton from "../../components/common/ExportButton";
 import DatePicker from "../../components/form/date-picker";
 import { emitToast } from "../../services/toastBus";
 import { useAuth } from "../../context/AuthContext";
@@ -14,6 +15,7 @@ import {
   toggleDelegation,
   updateDelegation,
 } from "../../services/delegations.admin.service";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 export default function DelegationsAdmin() {
   const { user, hasAnyRole } = useAuth();
@@ -119,6 +121,22 @@ export default function DelegationsAdmin() {
     });
     return map;
   }, [agents]);
+  const exportColumns = [
+    { header: "Principal", value: (d) => agentLabel.get(d.principal_id) || d.principal_id || "-" },
+    { header: "Délégué", value: (d) => agentLabel.get(d.delegate_id) || d.delegate_id || "-" },
+    { header: "Rôle", value: (d) => d?.role_name || "-" },
+    { header: "Portée", value: (d) => d?.scope || "GLOBAL" },
+    { header: "Actif", value: (d) => (d?.is_active ? "Oui" : "Non") },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows,
+      columns: exportColumns,
+      filename: `delegations_${dateTag}.xlsx`,
+      sheetName: "Delegations",
+    });
+  };
 
   const save = async () => {
     if (!form.principal_id || !form.delegate_id || !form.role_name || !form.end_at) {
@@ -240,17 +258,23 @@ export default function DelegationsAdmin() {
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white/90">Délégations</h1>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Définir qui valide à la place de qui.</p>
           </div>
-          <button
-            onClick={() => {
-              if (!isAdmin && myAgentId) {
-                setForm((p) => ({ ...p, principal_id: myAgentId }));
-              }
-              setCreateOpen(true);
-            }}
-            className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
-          >
-            Nouvelle délégation
-          </button>
+          <div className="flex items-center gap-2">
+                        <ExportButton
+              onExport={handleExport}
+              disabled={!rows.length}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+            />            <button
+              onClick={() => {
+                if (!isAdmin && myAgentId) {
+                  setForm((p) => ({ ...p, principal_id: myAgentId }));
+                }
+                setCreateOpen(true);
+              }}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
+            >
+              Nouvelle délégation
+            </button>
+          </div>
         </div>
 
         {error ? (
@@ -563,7 +587,7 @@ export default function DelegationsAdmin() {
 
         <div className="mt-4 text-sm text-gray-700 dark:text-gray-200">
           Supprimer la délégation de <span className="font-medium">{agentLabel.get(confirmRow?.principal_id) || confirmRow?.principal_id}</span>
-          {" "}→{" "}
+          {" "}â†’{" "}
           <span className="font-medium">{agentLabel.get(confirmRow?.delegate_id) || confirmRow?.delegate_id}</span>
           {confirmRow?.role_name ? ` (${confirmRow.role_name})` : ""} ?
         </div>
@@ -591,3 +615,4 @@ export default function DelegationsAdmin() {
     </>
   );
 }
+

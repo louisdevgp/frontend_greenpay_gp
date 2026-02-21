@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { FiArrowLeft, FiDownload, FiEye, FiRefreshCw } from "react-icons/fi";
 import { getValidationByUuid } from "../../services/validations.service";
 import { listDocuments } from "../../services/documents.service";
 import ValidationActionModal from "./ValidationActionModal";
+import LoadingButton from "../../components/common/LoadingButton";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
@@ -28,7 +29,7 @@ function ActorLabel({ validation }) {
 }
 
 export default function ValidationDetail() {
-  const { uuid } = useParams(); // ✅ uuid
+  const { uuid } = useParams(); // âœ… uuid
   const nav = useNavigate();
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
@@ -38,6 +39,18 @@ export default function ValidationDetail() {
   const [validation, setValidation] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [downloadState, setDownloadState] = useState({});
+
+  const isDownloading = (key) => !!downloadState[key];
+  const runDownload = async (key, fn) => {
+    if (isDownloading(key)) return;
+    setDownloadState((prev) => ({ ...prev, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setDownloadState((prev) => ({ ...prev, [key]: false }));
+    }
+  };
 
   const fetchValidation = async () => {
     setLoading(true);
@@ -194,22 +207,26 @@ export default function ValidationDetail() {
                 <div className="text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
               ) : (
                 <div className="space-y-2">
-                  {documents.map((doc) => (
-                    <div key={doc.id} className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
-                      <div>
-                        <div className="font-medium">{doc.type_document}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                  {documents.map((doc) => {
+                    const downloadKey = `doc-${doc.id}`;
+                    return (
+                      <div key={doc.id} className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
+                        <div>
+                          <div className="font-medium">{doc.type_document}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                        </div>
+                        <LoadingButton
+                          onClick={() => runDownload(downloadKey, () => downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier))}
+                          loading={isDownloading(downloadKey)}
+                          title="Télécharger"
+                          aria-label="Télécharger"
+                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                        >
+                          {isDownloading(downloadKey) ? null : <FiDownload />}
+                        </LoadingButton>
                       </div>
-                      <button
-                        onClick={() => downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier)}
-                        title="Télécharger"
-                        aria-label="Télécharger"
-                        className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                      >
-                        <FiDownload />
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

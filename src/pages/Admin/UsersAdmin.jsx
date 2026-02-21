@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState, lazy, Suspense } from "react";
+﻿import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
+import ExportButton from "../../components/common/ExportButton";
 import { emitToast } from "../../services/toastBus";
 import { adminResetUserPassword, createUser, listUsers, softDeleteUser, updateUser } from "../../services/users.admin.service";
 import { listRoles } from "../../services/roles.service";
 import { setUserRoles } from "../../services/userRoles.service";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 function uniq(arr) {
   return Array.from(new Set((arr || []).filter(Boolean)));
@@ -75,6 +77,22 @@ export default function UsersAdmin() {
   const roleNames = useMemo(() => {
     return (roles || []).map((r) => r?.name).filter(Boolean);
   }, [roles]);
+  const exportColumns = [
+    { header: "Email", value: (u) => u?.email || "-" },
+    { header: "Nom", value: (u) => u?.nom || "-" },
+    { header: "Prénom", value: (u) => u?.prenom || "-" },
+    { header: "Rôles", value: (u) => (u?.roles || []).join(", ") || "-" },
+    { header: "Actif", value: (u) => (u?.is_active ? "Oui" : "Non") },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows,
+      columns: exportColumns,
+      filename: `utilisateurs_${dateTag}.xlsx`,
+      sheetName: "Utilisateurs",
+    });
+  };
 
   const save = async () => {
     if (!editUser?.id && !editUser?.uuid) return;
@@ -218,6 +236,11 @@ export default function UsersAdmin() {
               Filtrer
             </button>
 
+            <ExportButton
+              onExport={handleExport}
+              disabled={!rows.length}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+            />
             <button
               onClick={openCreate}
               className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800"
@@ -530,3 +553,7 @@ export default function UsersAdmin() {
     </>
   );
 }
+
+
+
+

@@ -9,8 +9,11 @@ import { emitToast } from "../../services/toastBus";
 export default function CreateReceptionModal({ open, paiement, demande, onClose, onCreated }) {
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
-    const isPaidDemande = ["paye", "cloture"].includes(String(demande?.statut || "").toLowerCase());
-    const canAfter = Boolean(paiement?.id) || isPaidDemande;
+    const statutLower = String(demande?.statut || "").toLowerCase();
+    const hasAnyPaiement = Boolean(paiement?.id) || (demande?.paiements?.length || 0) > 0;
+    const canAfter =
+        hasAnyPaiement ||
+        ["en_attente_paiement", "paye", "payee", "cloture", "cloturee"].includes(statutLower);
 
     const [form, setForm] = useState({
         phase: "AVANT_PAIEMENT",

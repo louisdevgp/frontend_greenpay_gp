@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { FiEye, FiRefreshCw } from "react-icons/fi";
-import { listValidationsDone } from "../../services/validations.service";
+import { FiEye, FiRefreshCw, FiX } from "react-icons/fi";
+import { cancelValidation, listValidationsDone } from "../../services/validations.service";
 import Pagination from "../../components/common/Pagination";
 import Loader from "../../components/common/Loader";
 import DatePicker from "../../components/form/date-picker";
@@ -11,6 +11,10 @@ import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import { useAuth } from "../../context/AuthContext";
 import { validationActorLabel } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { emitToast } from "../../services/toastBus";
+import ConfirmActionModal from "../../components/common/ConfirmActionModal";
+import ExportButton from "../../components/common/ExportButton";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 const STORAGE_KEY = "filters:validations:done";
 
@@ -28,7 +32,8 @@ function pickDemande(v) {
 
 function ActorLabel({ validation }) {
   const actor = validationActorLabel(validation);
-  const primary = actor?.primary || "-";
+  const primaryRaw = actor?.primary || "-";
+  const primary = primaryRaw && primaryRaw !== "-" ? primaryRaw : "Moi";
   const secondary = actor?.secondary;
 
   return (
@@ -48,11 +53,16 @@ const initialState = {
 export default function ValidationsDone() {
   const { user } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const permissions = (user?.permissions || []).map((p) => String(p).toUpperCase());
+  const canCancel = permissions.includes("VALIDATION_CANCEL");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState([]);
   const [filtered, setFiltered] = useState([]);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelComment, setCancelComment] = useState("");
 
   const [state, setState] = useState(() => {
     const saved = loadPersistedState(STORAGE_KEY);
@@ -134,20 +144,95 @@ export default function ValidationsDone() {
   }, [filtered, state.page, state.pageSize]);
 
   const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
+  const exportColumns = [
+    { header: "UUID", value: (v) => v?.uuid || "-" },
+    { header: "Rôle", value: (v) => v?.role_name || "-" },
+    { header: "Demande", value: (v) => pickDemande(v)?.motif || "-" },
+    {
+      header: "Montant",
+      value: (v) => {
+        const d = pickDemande(v);
+        return d ? `${formatMoney(d.montant_net ?? d.montant)} FCFA` : "-";
+      },
+    },
+    { header: "Statut", value: (v) => labelValidationStepStatus(v?.status) },
+    {
+      header: "Validé par",
+      value: (v) => {
+        const actor = validationActorLabel(v);
+        const primaryRaw = actor?.primary || "-";
+        const primary = primaryRaw && primaryRaw !== "-" ? primaryRaw : "Moi";
+        const secondary = actor?.secondary;
+        return secondary ? `${primary} (${secondary})` : primary;
+      },
+    },
+    { header: "Date", value: (v) => formatDateTime(v?.validated_at) },
+    { header: "Commentaire", value: (v) => v?.commentaire || "-" },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows: filtered,
+      columns: exportColumns,
+      filename: `validations_traitees_${dateTag}.xlsx`,
+      sheetName: "Validations",
+    });
+  };
+
+  const openCancel = (validation) => {
+    setCancelComment("");
+    const stepId = validation?.step_id ?? validation?.id;
+    setCancelTarget({ ...validation, step_id: stepId });
+  };
+
+  const closeCancel = () => {
+    if (cancelLoading) return;
+    setCancelTarget(null);
+    setCancelComment("");
+  };
+
+  const confirmCancel = async () => {
+    if (!cancelTarget) return;
+    const commentaire = String(cancelComment || "").trim();
+    if (!commentaire) {
+      emitToast("Commentaire obligatoire", "error");
+      return;
+    }
+    setCancelLoading(true);
+    try {
+      const stepId = cancelTarget?.step_id ?? cancelTarget?.id;
+      const res = await cancelValidation(stepId, { commentaire });
+      if (!res?.success) throw new Error(res?.message || "Annulation impossible");
+      emitToast("Validation annulée", "success");
+      closeCancel();
+      await fetch();
+    } catch (e) {
+      emitToast(e?.message || "Erreur d'annulation", "error");
+    } finally {
+      setCancelLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Validations traitées</h1>
-        <button
-          onClick={fetch}
-          disabled={loading}
-          title="Actualiser"
-          aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
-        >
-          <FiRefreshCw />
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportButton
+            onExport={handleExport}
+            disabled={!filtered.length}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+          />
+          <button
+            onClick={fetch}
+            disabled={loading}
+            title="Actualiser"
+            aria-label="Actualiser"
+            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
+          >
+            <FiRefreshCw />
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -168,6 +253,8 @@ export default function ValidationsDone() {
               <option value="">Tous</option>
               <option value="valide">Validé</option>
               <option value="rejete">Rejeté</option>
+              <option value="annulee">Annulée</option>
+              <option value="retour_modification">Retournée (modification)</option>
             </select>
           </div>
 
@@ -236,14 +323,32 @@ export default function ValidationsDone() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Validé par</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Commentaire</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                {paged.map((validation) => {
+                {paged.map((validation, index) => {
                   const demande = pickDemande(validation);
+                  const statusKey = String(validation?.status || "").toLowerCase();
+                  const statusClass =
+                    statusKey === "valide"
+                      ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
+                      : statusKey === "rejete" || statusKey === "rejetee"
+                        ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200"
+                        : statusKey === "retour_modification"
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                          : statusKey === "annulee" || statusKey === "annule"
+                            ? "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                            : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
+                  const canCancelRow =
+                    canCancel &&
+                    (validation?.can_cancel === true ||
+                      (validation?.can_cancel == null && statusKey === "valide"));
+                  const rowKey =
+                    validation?.audit_id ?? validation?.id ?? validation?.uuid ?? `${validation?.step_id ?? "row"}-${index}`;
                   return (
-                    <tr key={validation.id}>
+                    <tr key={rowKey}>
                       <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{validation?.uuid || "-"}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{validation?.role_name || "-"}</td>
                       <td className="px-4 py-3 text-sm">
@@ -257,11 +362,7 @@ export default function ValidationsDone() {
                       </td>
                       <td className="px-4 py-3 text-sm">{demande ? `${formatMoney(demande.montant_net ?? demande.montant)} FCFA` : "-"}</td>
                       <td className="px-4 py-3 text-sm">
-                        <span className={`px-2 py-1 text-xs rounded ${
-                          validation.status === "valide"
-                            ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
-                            : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200"
-                        }`}>
+                        <span className={`px-2 py-1 text-xs rounded ${statusClass}`}>
                           {labelValidationStepStatus(validation.status)}
                         </span>
                       </td>
@@ -269,19 +370,34 @@ export default function ValidationsDone() {
                         <ActorLabel validation={validation} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(validation.validated_at)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs">
+                        {validation?.commentaire || "-"}
+                      </td>
                       <td className="px-4 py-3 text-sm">
-                        {canViewDetails ? (
-                        <Link
-                          to={`/validations/${validation.uuid}`}
-                          title="Voir"
-                          aria-label="Voir"
-                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                        >
-                          <FiEye />
-                        </Link>
-                        ) : (
-                          "-"
-                        )}
+                        <div className="flex items-center gap-2">
+                          {canViewDetails && validation?.uuid ? (
+                            <Link
+                              to={`/validations/${validation.uuid}`}
+                              title="Voir"
+                              aria-label="Voir"
+                              className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                            >
+                              <FiEye />
+                            </Link>
+                          ) : null}
+                          {canCancelRow ? (
+                            <button
+                              type="button"
+                              title="Annuler la validation"
+                              aria-label="Annuler la validation"
+                              onClick={() => openCancel(validation)}
+                              className="inline-flex items-center justify-center p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:text-red-400 dark:hover:bg-red-950"
+                            >
+                              <FiX />
+                            </button>
+                          ) : null}
+                          {!canViewDetails && !canCancelRow ? "-" : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -299,6 +415,25 @@ export default function ValidationsDone() {
           />
         </>
       )}
+
+      <ConfirmActionModal
+        open={!!cancelTarget}
+        title="Annuler la validation"
+        message="Cette action n'est possible que si aucune validation supérieure n'a été effectuée. Commentaire obligatoire."
+        confirmLabel="Annuler"
+        cancelLabel="Fermer"
+        confirmVariant="danger"
+        loading={cancelLoading}
+        onClose={closeCancel}
+        onConfirm={confirmCancel}
+        showComment
+        commentLabel="Commentaire"
+        commentPlaceholder="Précisez la raison de l'annulation"
+        commentValue={cancelComment}
+        onCommentChange={(e) => setCancelComment(e.target.value)}
+        commentRequired
+        confirmDisabled={!String(cancelComment || "").trim()}
+      />
     </div>
   );
 }

@@ -95,8 +95,9 @@ api.interceptors.response.use(
         last401ToastAt = now;
         emitToast({
           variant: "warning",
-          title: "Identifiants incorrectes",
+          title: "Identifiants incorrects",
           message: "Veuillez vous reconnecter.",
+          timeoutMs: 4500,
         });
       }
     } else if (status === 403) {

@@ -5,11 +5,13 @@ import { listValidationsPending } from "../../services/validations.service";
 import ValidationActionModal from "./ValidationActionModal";
 import Pagination from "../../components/common/Pagination";
 import Loader from "../../components/common/Loader";
+import ExportButton from "../../components/common/ExportButton";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { labelValidationStepStatus } from "../../utils/statusLabels";
 import { useAuth } from "../../context/AuthContext";
 import { agentDisplayName } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 const STORAGE_KEY = "filters:validations:pending";
 
@@ -112,6 +114,36 @@ export default function ValidationsPending() {
   }, [filtered, state.page, state.pageSize]);
 
   const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
+  const exportColumns = [
+    { header: "UUID", value: (v) => v?.uuid || "-" },
+    { header: "Rôle", value: (v) => v?.role_name || "-" },
+    { header: "Demande", value: (v) => pickDemande(v)?.motif || "-" },
+    {
+      header: "Montant",
+      value: (v) => {
+        const d = pickDemande(v);
+        return d ? `${formatMoney(d.montant_net ?? d.montant)} FCFA` : "-";
+      },
+    },
+    { header: "Statut", value: (v) => labelValidationStepStatus(v?.status) },
+    {
+      header: "Demandeur",
+      value: (v) => {
+        const d = pickDemande(v);
+        return agentDisplayName(d?.agents_demandes_paiement_demandeur_idToagents);
+      },
+    },
+    { header: "Créé", value: (v) => formatDateTime(v?.created_at) },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows: filtered,
+      columns: exportColumns,
+      filename: `validations_en_attente_${dateTag}.xlsx`,
+      sheetName: "Validations",
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -125,15 +157,22 @@ export default function ValidationsPending() {
 
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Validations en attente</h1>
-        <button
-          onClick={fetch}
-          disabled={loading}
-          title="Actualiser"
-          aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
-        >
-          <FiRefreshCw />
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportButton
+            onExport={handleExport}
+            disabled={!filtered.length}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+          />
+          <button
+            onClick={fetch}
+            disabled={loading}
+            title="Actualiser"
+            aria-label="Actualiser"
+            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
+          >
+            <FiRefreshCw />
+          </button>
+        </div>
       </div>
 
       {error ? (

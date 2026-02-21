@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiDownload, FiEye, FiRefreshCw } from "react-icons/fi";
 import { getPaiement } from "../../services/paiements.service";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
+import LoadingButton from "../../components/common/LoadingButton";
 import { downloadFile } from "../../utils/downloadFile";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 
@@ -18,6 +19,18 @@ export default function PaiementDetail() {
   const [paiement, setPaiement] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [downloadState, setDownloadState] = useState({});
+
+  const isDownloading = (key) => !!downloadState[key];
+  const runDownload = async (key, fn) => {
+    if (isDownloading(key)) return;
+    setDownloadState((prev) => ({ ...prev, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setDownloadState((prev) => ({ ...prev, [key]: false }));
+    }
+  };
 
   const fetchPaiement = async () => {
     setLoading(true);
@@ -98,15 +111,20 @@ export default function PaiementDetail() {
                 <FiArrowLeft />
               </button>
               {canDownloadPdf ? (
-                <button
+                <LoadingButton
                   type="button"
-                  onClick={() => downloadFile(`/paiements/${paiement.uuid}/pdf`, `paiement_${paiement.uuid}.pdf`)}
+                  onClick={() =>
+                    runDownload("paiement-pdf", () =>
+                      downloadFile(`/paiements/${paiement.uuid}/pdf`, `paiement_${paiement.uuid}.pdf`)
+                    )
+                  }
+                  loading={isDownloading("paiement-pdf")}
                   title="Télécharger PDF"
                   aria-label="Télécharger PDF"
                   className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                 >
-                  <FiDownload />
-                </button>
+                  {isDownloading("paiement-pdf") ? null : <FiDownload />}
+                </LoadingButton>
               ) : null}
               <button
                 onClick={fetchPaiement}

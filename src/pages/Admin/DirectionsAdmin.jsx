@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
+import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
 import { createDirection, deleteDirection, listDirections, updateDirection } from "../../services/directions.service";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 export default function DirectionsAdmin() {
   const [loading, setLoading] = useState(true);
@@ -29,6 +31,19 @@ export default function DirectionsAdmin() {
     } finally {
       setLoading(false);
     }
+  };
+  const exportColumns = [
+    { header: "Nom", value: (r) => r?.nom || "-" },
+    { header: "Code", value: (r) => r?.code || "-" },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    exportRowsToExcel({
+      rows,
+      columns: exportColumns,
+      filename: `directions_${dateTag}.xlsx`,
+      sheetName: "Directions",
+    });
   };
 
   useEffect(() => {
@@ -103,12 +118,18 @@ export default function DirectionsAdmin() {
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white/90">Directions</h1>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Créer, modifier, supprimer des directions.</p>
           </div>
-          <button
-            onClick={openCreate}
-            className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
-          >
-            Nouveau
-          </button>
+          <div className="flex items-center gap-2">
+                        <ExportButton
+              onExport={handleExport}
+              disabled={!rows.length}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+            />            <button
+              onClick={openCreate}
+              className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
+            >
+              Nouveau
+            </button>
+          </div>
         </div>
 
         {error ? (
@@ -216,3 +237,4 @@ export default function DirectionsAdmin() {
     </>
   );
 }
+

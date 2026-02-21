@@ -21,6 +21,16 @@ function Field({ label, children, error }) {
   );
 }
 
+function isItemActive(it) {
+  const designation = String(it?.designation || "").trim();
+  const unite = String(it?.unite || "").trim();
+  const qRaw = it?.quantite;
+  const qStr = qRaw !== undefined && qRaw !== null ? String(qRaw).trim() : "";
+  const puStr = String(it?.prix_unitaire ?? "").trim();
+  const hasQty = qStr !== "" && qStr !== "1";
+  return designation || unite || hasQty || puStr;
+}
+
 export default function CreateDemande() {
   const nav = useNavigate();
 
@@ -55,22 +65,7 @@ export default function CreateDemande() {
     }, 0);
   }, [form.items]);
 
-  const hasItems = useMemo(() => {
-    return form.items.some((it) => {
-      const designation = String(it?.designation || "").trim();
-      const unite = String(it?.unite || "").trim();
-      const qRaw = it?.quantite;
-      const qStr = qRaw !== undefined && qRaw !== null ? String(qRaw).trim() : "";
-      const puStr = String(it?.prix_unitaire ?? "").trim();
-      const hasQty = qStr !== "" && qStr !== "1";
-      return (
-        designation ||
-        unite ||
-        hasQty ||
-        puStr
-      );
-    });
-  }, [form.items]);
+  const hasItems = useMemo(() => form.items.some(isItemActive), [form.items]);
 
   const montantNum = useMemo(() => {
     const n = Number(form.montant);
@@ -191,6 +186,7 @@ export default function CreateDemande() {
 
     // Validation des items
     form.items.forEach((it, idx) => {
+      if (!isItemActive(it)) return;
       if (!it.designation.trim()) newErrors[`item_${idx}_designation`] = "La désignation est requise";
       const q = Number(it.quantite);
       if (!q || Number.isNaN(q) || q <= 0) newErrors[`item_${idx}_quantite`] = "Quantité invalide";

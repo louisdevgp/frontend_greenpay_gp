@@ -54,6 +54,9 @@ export function labelValidationStepStatus(status) {
     rejete: "Rejeté",
     rejetee: "Rejeté",
     "rejeté": "Rejeté",
+    annule: "Annulée",
+    annulee: "Annulée",
+    annulation: "Annulée",
   };
 
   return map[k] || titleizeFromKey(k);

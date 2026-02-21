@@ -5,6 +5,7 @@ export default function LoadingButton({
   disabled,
   children,
   className = "",
+  spinnerClassName = "",
   ...props
 }) {
   const isDisabled = disabled || loading;
@@ -18,7 +19,9 @@ export default function LoadingButton({
       }`}
     >
       {loading ? (
-        <span className="w-4 h-4 rounded-full border-2 border-white/70 border-t-white animate-spin" />
+        <span
+          className={`w-4 h-4 rounded-full border-2 border-current/70 border-t-current animate-spin ${spinnerClassName}`}
+        />
       ) : null}
       {children}
     </button>

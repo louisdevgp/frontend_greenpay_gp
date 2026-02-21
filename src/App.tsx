@@ -101,12 +101,12 @@ export default function App() {
             {/* ---------------- MODULES METIER PROTEGES PAR ROLES ---------------- */}
 
               {/* Paiements/Réceptions : COMPTABLE + DAF + CAISSE + DIRECTEUR + ADMIN */}
-              <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "CAISSE", "DIRECTEUR", "ADMIN"]} />}>
+              <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "CAISSE", "DIRECTEUR", "ADMIN", "DEMANDEUR"]} />}>
                 <Route path="/paiements" element={<PaiementsList />} />
                 <Route path="/paiements/done" element={<PaiementsList />} />
                 <Route path="/paiements/pending" element={<PaiementsPending />} />
                 <Route path="/paiements/:uuid" element={<PaiementDetail />} />
-                <Route path="/receptions" element={<ReceptionsList mode="done" />} />
+                <Route path="/receptions" element={<ReceptionsList mode="all" />} />
                 <Route path="/receptions/done" element={<ReceptionsList mode="done" />} />
                 <Route path="/receptions/pending" element={<ReceptionsList mode="pending" />} />
                 <Route path="/receptions/:uuid" element={<ReceptionDetail />} />

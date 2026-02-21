@@ -18,6 +18,11 @@ export async function getDemande(uuid) {
   return res.data; // { success, data: {...} }
 }
 
+export async function getDemandeValidationHistory(idOrUuid, params = {}) {
+  const res = await api.get(`/demandes/${idOrUuid}/validation-history`, { params });
+  return res.data;
+}
+
 // Create demande (sans documents ici; proforma/devis via documents API)
 export async function createDemande(payload) {
   const res = await api.post("/demandes", payload);
@@ -33,6 +38,12 @@ export async function updateDemande(uuid, payload) {
 // Soft delete (si ton backend fait delete logique)
 export async function deleteDemande(uuid) {
   const res = await api.delete(`/demandes/${uuid}`);
+  return res.data;
+}
+
+// Close demande
+export async function closeDemande(uuid) {
+  const res = await api.patch(`/demandes/${uuid}/close`);
   return res.data;
 }
 

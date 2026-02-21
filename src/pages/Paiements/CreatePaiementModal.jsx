@@ -13,7 +13,7 @@ function round2(v) {
   return Math.round(Number(v) * 100) / 100;
 }
 
-const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement"]);
+const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "receptionnee"]);
 
 function isPayableStatus(statut) {
   return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
@@ -37,7 +37,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
 
   const fetchDemandes = async () => {
     try {
-      const res = await listAllDemandes({ statut: "approuvee,en_attente_paiement" });
+      const res = await listAllDemandes({ statut: "approuvee,en_attente_paiement,receptionnee" });
       if (res?.success) {
         const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut));
         setDemandes(rows);

@@ -19,6 +19,16 @@ function Field({ label, children, error }) {
   );
 }
 
+function isItemActive(it) {
+  const designation = String(it?.designation || "").trim();
+  const unite = String(it?.unite || "").trim();
+  const qRaw = it?.quantite;
+  const qStr = qRaw !== undefined && qRaw !== null ? String(qRaw).trim() : "";
+  const puStr = String(it?.prix_unitaire ?? "").trim();
+  const hasQty = qStr !== "" && qStr !== "1";
+  return designation || unite || hasQty || puStr;
+}
+
 export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
   const [form, setForm] = useState(() => {
     if (!demande) return null;
@@ -131,6 +141,7 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
 
     // Validation des items
     form.items.forEach((it, idx) => {
+      if (!isItemActive(it)) return;
       if (!it.designation.trim()) newErrors[`item_${idx}_designation`] = "La désignation est requise";
       const q = Number(it.quantite);
       if (!q || Number.isNaN(q) || q <= 0) newErrors[`item_${idx}_quantite`] = "Quantité invalide";

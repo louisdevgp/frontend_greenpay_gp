@@ -63,8 +63,8 @@ const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
     {
       section: "main",
       icon: <TableIcon />,
-      name: "RÃ©ceptions",
-      subItems: [{ name: "Mes rÃ©ceptions", path: "/receptions" }],
+      name: "Réceptions",
+      subItems: [{ name: "Mes réceptions", path: "/receptions" }],
     },
     { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
   ],

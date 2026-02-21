@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiDownload, FiEye, FiFilePlus, FiRefreshCw } from "react-icons/fi";
 import { listReceptions } from "../../services/receptions.service";
 import { listAllDemandes } from "../../services/demandes.services";
 import Pagination from "../../components/common/Pagination";
 import Loader from "../../components/common/Loader";
+import LoadingButton from "../../components/common/LoadingButton";
+import ExportButton from "../../components/common/ExportButton";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import DatePicker from "../../components/form/date-picker";
@@ -13,6 +15,7 @@ import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import CreateReceptionModal from "./CreateReceptionModal";
 import { downloadFile } from "../../utils/downloadFile";
+import { exportRowsToExcel } from "../../utils/excelExport";
 
 function formatDate(input) {
   if (!input) return "";
@@ -55,6 +58,18 @@ export default function ReceptionsList({ mode = "all" }) {
   const [filtered, setFiltered] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedDemande, setSelectedDemande] = useState(null);
+  const [downloadState, setDownloadState] = useState({});
+
+  const isDownloading = (key) => !!downloadState[key];
+  const runDownload = async (key, fn) => {
+    if (isDownloading(key)) return;
+    setDownloadState((prev) => ({ ...prev, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setDownloadState((prev) => ({ ...prev, [key]: false }));
+    }
+  };
 
   const [state, setState] = useState(() => {
     const saved = loadPersistedState(storageKey);
@@ -178,7 +193,8 @@ export default function ReceptionsList({ mode = "all" }) {
     effectiveRoles.has("DAF") ||
     effectiveRoles.has("DGA") ||
     effectiveRoles.has("DG") ||
-    effectiveRoles.has("DIRECTEUR");
+    effectiveRoles.has("DIRECTEUR") ||
+    effectiveRoles.has("DEMANDEUR");
   const title =
     modeKey === "pending" ? "Réceptions en attente"
       : modeKey === "done" ? "Réceptions effectuées"
@@ -197,20 +213,58 @@ export default function ReceptionsList({ mode = "all" }) {
     setCreateOpen(false);
     setSelectedDemande(null);
   };
+  const exportColumnsDemandes = [
+    { header: "UUID", key: "uuid" },
+    { header: "Motif", key: "motif" },
+    { header: "Statut", value: (d) => labelDemandeStatut(d.statut) },
+    { header: "Bénéficiaire", value: (d) => d.beneficiaire || "-" },
+    { header: "Montant", value: (d) => `${formatMoney(d.montant_net ?? d.montant)} FCFA` },
+    { header: "Créé", value: (d) => formatDateTime(d.created_at) },
+  ];
+  const exportColumnsReceptions = [
+    { header: "UUID", key: "uuid" },
+    { header: "Receveur", value: (r) => r.receveur_nom || "-" },
+    { header: "Date réception", value: (r) => formatDateTime(r.date_reception) },
+    { header: "Phase", value: (r) => formatPhase(r.phase) },
+    { header: "Réf. facture", value: (r) => r.reference_facture || "-" },
+    { header: "Montant", value: (r) => (r.montant != null ? `${formatMoney(r.montant)} FCFA` : "-") },
+    { header: "Conforme", value: (r) => (r.conforme ? "Oui" : "Non") },
+    { header: "Visa Directeur", value: (r) => (r.visa_directeur_id ? "Oui" : "Non") },
+    { header: "Visa DAF", value: (r) => (r.visa_daf_id ? "Oui" : "Non") },
+  ];
+  const handleExport = () => {
+    const dateTag = new Date().toISOString().slice(0, 10);
+    const rows = filtered;
+    const columns = showDemandes ? exportColumnsDemandes : exportColumnsReceptions;
+    const filename = showDemandes ? `demandes_receptions_${dateTag}.xlsx` : `receptions_${dateTag}.xlsx`;
+    exportRowsToExcel({
+      rows,
+      columns,
+      filename,
+      sheetName: showDemandes ? "Demandes" : "Receptions",
+    });
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">{title}</h1>
-        <button
-          onClick={fetch}
-          disabled={loading}
-          title="Actualiser"
-          aria-label="Actualiser"
-          className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
-        >
-          <FiRefreshCw />
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportButton
+            onExport={handleExport}
+            disabled={!filtered.length}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+          />
+          <button
+            onClick={fetch}
+            disabled={loading}
+            title="Actualiser"
+            aria-label="Actualiser"
+            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
+          >
+            <FiRefreshCw />
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -386,15 +440,20 @@ export default function ReceptionsList({ mode = "all" }) {
                       <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2">
                           {modeKey === "done" && reception.visa_daf_id && canViewDetails ? (
-                            <button
+                            <LoadingButton
                               type="button"
-                              onClick={() => downloadFile(`/receptions/${reception.uuid}/pdf`, `reception_${reception.uuid}.pdf`)}
+                              onClick={() =>
+                                runDownload(`reception-${reception.uuid}`, () =>
+                                  downloadFile(`/receptions/${reception.uuid}/pdf`, `reception_${reception.uuid}.pdf`)
+                                )
+                              }
+                              loading={isDownloading(`reception-${reception.uuid}`)}
                               title="Télécharger PDF"
                               aria-label="Télécharger PDF"
                               className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
                             >
-                              <FiDownload />
-                            </button>
+                              {isDownloading(`reception-${reception.uuid}`) ? null : <FiDownload />}
+                            </LoadingButton>
                           ) : null}
                           {canViewDetails ? (
                             <Link

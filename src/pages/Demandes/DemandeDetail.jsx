@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { getDemande } from "../../services/demandes.services";
+import { getDemande, deleteDemande, closeDemande, getDemandeValidationHistory } from "../../services/demandes.services";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
-import { FiArrowLeft, FiDownload, FiEdit2, FiEye, FiRefreshCw, FiUpload } from "react-icons/fi";
+import { FiArrowLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
+import CreateReceptionModal from "../Receptions/CreateReceptionModal";
+import ConfirmActionModal from "../../components/common/ConfirmActionModal";
+import LoadingButton from "../../components/common/LoadingButton";
 import { emitToast } from "../../services/toastBus";
 import { downloadFile } from "../../utils/downloadFile";
 import { labelDemandeStatut, labelValidationStepStatus, demandeStatusBadgeClass } from "../../utils/statusLabels";
@@ -48,13 +51,32 @@ export default function DemandeDetail() {
   const [docsLoading, setDocsLoading] = useState(false);
   const [paiements, setPaiements] = useState([]);
   const [paiementsLoading, setPaiementsLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [validationHistory, setValidationHistory] = useState([]);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [receptionModalOpen, setReceptionModalOpen] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [closeLoading, setCloseLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState({ open: false, kind: null });
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [uploadType, setUploadType] = useState("devis_proforma");
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
+  const [downloadState, setDownloadState] = useState({});
+
+  const isDownloading = (key) => !!downloadState[key];
+  const runDownload = async (key, fn) => {
+    if (isDownloading(key)) return;
+    setDownloadState((prev) => ({ ...prev, [key]: true }));
+    try {
+      await fn();
+    } finally {
+      setDownloadState((prev) => ({ ...prev, [key]: false }));
+    }
+  };
 
   const fetchDemande = async () => {
     setLoading(true);
@@ -63,10 +85,29 @@ export default function DemandeDetail() {
       const res = await getDemande(uuid);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement demande");
       setDemande(res.data);
+      if (uuid) {
+        await fetchValidationHistory(uuid);
+      }
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchValidationHistory = async (demandeUuid) => {
+    if (!demandeUuid) return;
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const res = await getDemandeValidationHistory(demandeUuid);
+      if (!res?.success) throw new Error(res?.message || "Erreur chargement historique");
+      setValidationHistory(res.data || []);
+    } catch (e) {
+      setHistoryError(e?.message || "Erreur chargement historique");
+      setValidationHistory([]);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -110,13 +151,64 @@ export default function DemandeDetail() {
     }
   }, [demande?.id]);
 
+  const agentId = user?.agent?.id ?? user?.agent_id ?? user?.agentId;
+  const isAdmin = roles.includes("ADMIN");
+  const isOwner = useMemo(() => {
+    if (!demande || !agentId) return false;
+    return Number(demande.demandeur_id) === Number(agentId);
+  }, [demande, agentId]);
+
   const canEdit = useMemo(() => {
     if (!demande || !user) return false;
-    const agentId = user?.agent?.id ?? user?.agent_id ?? user?.agentId;
-    const isOwner = Number(demande.demandeur_id) === Number(agentId);
     const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
-    return (isOwner && isAModifier) || roles.includes("ADMIN");
-  }, [demande, user, roles]);
+    return isAModifier && (isOwner || isAdmin);
+  }, [demande, user, isOwner, isAdmin]);
+
+  const statutLower = useMemo(() => String(demande?.statut || "").toLowerCase(), [demande?.statut]);
+  const isClosed = useMemo(() => ["cloture", "cloturee"].includes(statutLower), [statutLower]);
+  const isRejected = useMemo(() => ["rejete", "rejetee"].includes(statutLower), [statutLower]);
+  const statutEligibleForReception = useMemo(
+    () => ["approuvee", "en_attente_paiement", "paye", "payee"].includes(statutLower),
+    [statutLower]
+  );
+
+  const hasValidationEngaged = useMemo(() => {
+    const steps = demande?.validation_steps || [];
+    return steps.some((step) => {
+      const st = String(step?.status || "").toLowerCase();
+      return st && !["en_attente", "bloque"].includes(st);
+    });
+  }, [demande?.validation_steps]);
+
+  const allValidationsApproved = useMemo(() => {
+    const steps = demande?.validation_steps || [];
+    if (!steps.length) return false;
+    return steps.every((step) => String(step?.status || "").toLowerCase() === "valide");
+  }, [demande?.validation_steps]);
+
+  const receptions = demande?.receptions || [];
+  const hasReceptionBefore = useMemo(
+    () => receptions.some((r) => String(r?.phase || "").toUpperCase() === "AVANT_PAIEMENT"),
+    [receptions]
+  );
+  const hasReceptionAfter = useMemo(
+    () => receptions.some((r) => String(r?.phase || "").toUpperCase() === "APRES_PAIEMENT"),
+    [receptions]
+  );
+  const hasReception = receptions.length > 0;
+
+  const canCancel = (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
+  const canClose =
+    (isOwner || isAdmin) &&
+    !isClosed &&
+    (hasReception || ["receptionnee", "paye", "payee"].includes(statutLower));
+  const canCreateReception =
+    isOwner &&
+    allValidationsApproved &&
+    statutEligibleForReception &&
+    !isClosed &&
+    !isRejected &&
+    !(hasReceptionBefore && hasReceptionAfter);
 
   const canDownloadPdf = useMemo(() => {
     const allowedRoles = new Set(["ADMIN", "DAF", "DGA", "DG", "COMPTABLE", "DEMANDEUR"]);
@@ -168,6 +260,81 @@ export default function DemandeDetail() {
     }
   };
 
+  const handleCancelDemande = async () => {
+    if (!demande?.uuid || cancelLoading) return;
+
+    setCancelLoading(true);
+    try {
+      const res = await deleteDemande(demande.uuid);
+      if (!res?.success) throw new Error(res?.message || "Annulation echouee");
+      emitToast("Demande annulee", "success");
+      nav(-1);
+    } catch (e) {
+      emitToast(e?.message || "Erreur annulation", "error");
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  const handleCloseDemande = async () => {
+    if (!demande?.uuid || closeLoading) return;
+
+    setCloseLoading(true);
+    try {
+      const res = await closeDemande(demande.uuid);
+      if (!res?.success) throw new Error(res?.message || "Cloture echouee");
+      emitToast("Demande cloturee", "success");
+      await fetchDemande();
+    } catch (e) {
+      emitToast(e?.message || "Erreur cloture", "error");
+    } finally {
+      setCloseLoading(false);
+    }
+  };
+
+  const requestCancelDemande = () => {
+    setConfirmAction({ open: true, kind: "cancel" });
+  };
+
+  const requestCloseDemande = () => {
+    setConfirmAction({ open: true, kind: "close" });
+  };
+
+  const confirmConfig = useMemo(() => {
+    if (confirmAction.kind === "cancel") {
+      return {
+        title: "Annuler la demande",
+        message: "Cette action est irreversible.",
+        confirmLabel: "Annuler",
+        variant: "danger",
+      };
+    }
+    if (confirmAction.kind === "close") {
+      return {
+        title: "Cloturer la demande",
+        message: "La demande sera cloturee.",
+        confirmLabel: "Cloturer",
+        variant: "warn",
+      };
+    }
+    return {
+      title: "Confirmation",
+      message: "",
+      confirmLabel: "Confirmer",
+      variant: "primary",
+    };
+  }, [confirmAction.kind]);
+
+  const handleConfirmAction = async () => {
+    const kind = confirmAction.kind;
+    setConfirmAction({ open: false, kind: null });
+    if (kind === "cancel") {
+      await handleCancelDemande();
+    } else if (kind === "close") {
+      await handleCloseDemande();
+    }
+  };
+
   const paiementsTotal = useMemo(
     () => (paiements || []).reduce((acc, p) => acc + (Number(p.montant) || 0), 0),
     [paiements]
@@ -179,6 +346,21 @@ export default function DemandeDetail() {
       new Date(a.created_at) - new Date(b.created_at)
     );
   }, [demande]);
+
+  const timelineItems = useMemo(() => {
+    const items = Array.isArray(validationHistory) ? [...validationHistory] : [];
+    items.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    return items;
+  }, [validationHistory]);
+
+  const timelineBadgeClass = (statusKey) => {
+    const key = String(statusKey || "").toLowerCase();
+    if (key === "valide") return { badge: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200", dot: "bg-green-500" };
+    if (key === "rejete" || key === "rejetee") return { badge: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200", dot: "bg-red-500" };
+    if (key === "retour_modification") return { badge: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200", dot: "bg-amber-500" };
+    if (key === "annule" || key === "annulee") return { badge: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200", dot: "bg-gray-400" };
+    return { badge: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200", dot: "bg-gray-400" };
+  };
 
   const itemsTotal = useMemo(() => {
     const items = demande?.demande_items || [];
@@ -343,6 +525,25 @@ export default function DemandeDetail() {
             demande={demande}
             onSaved={fetchDemande}
           />
+          <CreateReceptionModal
+            open={receptionModalOpen}
+            demande={demande}
+            onClose={() => setReceptionModalOpen(false)}
+            onCreated={() => {
+              setReceptionModalOpen(false);
+              fetchDemande();
+            }}
+          />
+          <ConfirmActionModal
+            open={confirmAction.open}
+            title={confirmConfig.title}
+            message={confirmConfig.message}
+            confirmLabel={confirmConfig.confirmLabel}
+            confirmVariant={confirmConfig.variant}
+            loading={confirmAction.kind === "cancel" ? cancelLoading : closeLoading}
+            onClose={() => setConfirmAction({ open: false, kind: null })}
+            onConfirm={handleConfirmAction}
+          />
 
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -371,16 +572,54 @@ export default function DemandeDetail() {
                   <FiEdit2 />
                 </button>
               ) : null}
-              {canDownloadPdf ? (
+              {canCreateReception ? (
                 <button
+                  onClick={() => setReceptionModalOpen(true)}
+                  disabled={loading}
+                  title="Creer reception"
+                  aria-label="Creer reception"
+                  className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-600 text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  <FiFilePlus />
+                </button>
+              ) : null}
+              {canClose ? (
+                <button
+                  onClick={requestCloseDemande}
+                  disabled={closeLoading}
+                  title="Cloturer"
+                  aria-label="Cloturer"
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-60 dark:border-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/20"
+                >
+                  <FiLock />
+                </button>
+              ) : null}
+              {canCancel ? (
+                <button
+                  onClick={requestCancelDemande}
+                  disabled={cancelLoading}
+                  title="Annuler"
+                  aria-label="Annuler"
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-900/20"
+                >
+                  <FiXCircle />
+                </button>
+              ) : null}
+              {canDownloadPdf ? (
+                <LoadingButton
                   type="button"
-                  onClick={() => downloadFile(`/demandes/${demande.uuid}/pdf`, `demande_${demande.uuid}.pdf`)}
+                  onClick={() =>
+                    runDownload("demande-pdf", () =>
+                      downloadFile(`/demandes/${demande.uuid}/pdf`, `demande_${demande.uuid}.pdf`)
+                    )
+                  }
+                  loading={isDownloading("demande-pdf")}
                   title="Télécharger PDF"
                   aria-label="Télécharger PDF"
                   className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                 >
-                  <FiDownload />
-                </button>
+                  {isDownloading("demande-pdf") ? null : <FiDownload />}
+                </LoadingButton>
               ) : null}
               <button
                 onClick={fetchDemande}
@@ -535,6 +774,47 @@ export default function DemandeDetail() {
               </div>
             </div>
           ) : null}
+
+          {/* Section Historique validations */}
+          <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Historique validations</div>
+            {historyLoading ? (
+              <div className="mt-3">
+                <Loader label="Chargement de l'historique..." />
+              </div>
+            ) : historyError ? (
+              <div className="mt-3 text-sm text-red-600 dark:text-red-300">{historyError}</div>
+            ) : timelineItems.length === 0 ? (
+              <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun historique.</div>
+            ) : (
+              <div className="mt-4 relative border-l border-gray-200 dark:border-gray-800">
+                {timelineItems.map((item, idx) => {
+                  const badge = timelineBadgeClass(item.status);
+                  const statusLabel = labelValidationStepStatus(item.status);
+                  const roleLabel = item.role_name ? String(item.role_name) : "";
+                  const key = item.audit_id ?? item.id ?? `${item.step_id || "step"}-${item.created_at || idx}`;
+                  return (
+                    <div key={key} className="relative pl-6 pb-6">
+                      <span className={`absolute left-[-7px] top-1.5 h-3 w-3 rounded-full ${badge.dot}`} />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`px-2 py-0.5 text-xs rounded ${badge.badge}`}>{statusLabel}</span>
+                        {roleLabel ? (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">{roleLabel}</span>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {formatDateTime(item.created_at)}
+                        {item.actor_name ? ` • ${item.actor_name}` : ""}
+                      </div>
+                      {item.commentaire ? (
+                        <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">{item.commentaire}</div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Section Conditions de paiement */}
           {hasConditionsPaiement ? (

@@ -8,7 +8,7 @@ export async function listValidationsPending(params = {}) {
 
 // Historique
 export async function listValidationsDone(params = {}) {
-  const res = await api.get("/validations/done", { params });
+  const res = await api.get("/validations/history", { params });
   return res.data;
 }
 
@@ -27,6 +27,12 @@ export async function rejectValidation(id, payload = {}) {
 // Retourner pour modification
 export async function returnValidationForModification(id, payload = {}) {
   const res = await api.post(`/validations/${id}/return-for-modification`, payload);
+  return res.data;
+}
+
+// Annuler une validation
+export async function cancelValidation(id, payload = {}) {
+  const res = await api.post(`/validations/${id}/cancel`, payload);
   return res.data;
 }
 
