@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import {
@@ -9,36 +9,38 @@ import {
   TableIcon,
   ListIcon,
   UserCircleIcon,
+  UserIcon,
+  GroupIcon,
+  FileIcon,
+  PlusIcon,
+  CheckCircleIcon,
+  TimeIcon,
+  LockIcon,
+  FolderIcon,
+  BoxIconLine,
+  PlugInIcon,
   HorizontaLDots,
 } from "../icons";
 
 import { useSidebar } from "../context/sidebar";
 import SidebarWidget from "./SidebarWidget";
 import { useAuth } from "../context/AuthContext.jsx";
+import { listPermissions } from "../services/permissions.admin.service";
 
-// ✅ Roles supportés (tu peux en ajouter)
-const ROLES = [
-  "ADMIN",
-  "DEMANDEUR",
-  "ASSISTANTE_TECHNIQUE",
-  "RESPONSABLE",
-  "DIRECTEUR",
-  "DAF",
-  "DGA",
-  "DG",
-  "COMPTABLE",
-  "CAISSE",
-  ] as const;
+type PermissionSpec = {
+  permission?: string;
+  permissions?: string[];
+  permissionsAll?: string[];
+};
 
-type Role = (typeof ROLES)[number];
-
-type SubItem = {
+type SubItem = PermissionSpec & {
   name: string;
   path: string;
+  icon?: ReactNode;
   new?: boolean;
 };
 
-type MenuItem = {
+type MenuItem = PermissionSpec & {
   section?: "main" | "others" | string;
   icon: ReactNode;
   name: string;
@@ -47,220 +49,86 @@ type MenuItem = {
   new?: boolean;
 };
 
-// ✅ Menus par rôle (paths à adapter à tes routes réelles)
-const MENUS_BY_ROLE: Record<Role, MenuItem[]> = {
-  DEMANDEUR: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <PageIcon />,
-      name: "Mes demandes",
-      subItems: [
-        { name: "Mes demandes", path: "/demandes/my" },
-        { name: "Nouvelle demande", path: "/demandes/create", new: true },
-      ],
-    },
-    {
-      section: "main",
-      icon: <TableIcon />,
-      name: "Réceptions",
-      subItems: [{ name: "Mes réceptions", path: "/receptions" }],
-    },
-    { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
-  ],
-
-  ASSISTANTE_TECHNIQUE: [
-    { section: "main", icon: <PageIcon />, name: "Demandes (Direction)", path: "/demandes/all" },
-    { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
-  ],
-
-  RESPONSABLE: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <ListIcon />,
-      name: "Mes validations",
-      subItems: [
-        { name: "En attente", path: "/validations/pending" },
-        { name: "Historique", path: "/validations/done" },
-        { name: "Délégations", path: "/delegations" },
-      ],
-    },
-    { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
-  ],
-
-  DIRECTEUR: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <ListIcon />,
-      name: "Validations",
-      subItems: [
-        { name: "En attente", path: "/validations/pending" },
-        { name: "Historique", path: "/validations/done" },
-        { name: "Délégations", path: "/delegations" },
-      ],
-    },
-    { section: "main", icon: <TableIcon />, name: "Réceptions", subItems: [
-      { name: "En attente", path: "/receptions/pending" },
-      { name: "Effectuées", path: "/receptions/done" },
-    ]},
-  ],
-
-  DAF: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <ListIcon />,
-      name: "Validations",
-      subItems: [
-        { name: "En attente", path: "/validations/pending" },
-        { name: "Historique", path: "/validations/done" },
-        { name: "Délégations", path: "/delegations" },
-      ],
-    },
-    { section: "main", icon: <TableIcon />, name: "Paiements", subItems: [
-      { name: "En attente", path: "/paiements/pending" },
-      { name: "Effectuées", path: "/paiements/done" },
-    ]},
-    { section: "main", icon: <TableIcon />, name: "Réceptions", subItems: [
-      { name: "En attente", path: "/receptions/pending" },
-      { name: "Effectuées", path: "/receptions/done" },
-    ]},
-  ],
-
-  COMPTABLE: [
-    { section: "main", icon: <TableIcon />, name: "Paiements", subItems: [
-      { name: "En attente", path: "/paiements/pending" },
-      { name: "Effectuées", path: "/paiements/done" },
-    ]},
-  ],
-
-  CAISSE: [
-    { section: "main", icon: <TableIcon />, name: "Paiements", subItems: [
-      { name: "En attente", path: "/paiements/pending" },
-      { name: "Effectuées", path: "/paiements/done" },
-    ]},
-  ],
-
-  DG: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <ListIcon />,
-      name: "Validations",
-      subItems: [
-        { name: "En attente", path: "/validations/pending" },
-        { name: "Historique", path: "/validations/done" },
-        { name: "Délégations", path: "/delegations" },
-      ],
-    },
-  ],
-
-  DGA: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <ListIcon />,
-      name: "Validations",
-      subItems: [
-        { name: "En attente", path: "/validations/pending" },
-        { name: "Historique", path: "/validations/done" },
-        { name: "Délégations", path: "/delegations" },
-      ],
-    },
-  ],
-
-  ADMIN: [
-    { section: "main", icon: <GridIcon />, name: "Dashboard", path: "/" },
-    {
-      section: "main",
-      icon: <BoxCubeIcon />,
-      name: "Administration",
-      subItems: [
-        { name: "Utilisateurs", path: "/admin/users" },
-        { name: "Permissions", path: "/admin/permissions" },
-        { name: "Hiérarchie", path: "/admin/hierarchy" },
-        { name: "Directions", path: "/admin/directions" },
-        { name: "Départements", path: "/admin/departements" },
-        { name: "Services", path: "/admin/services" },
-        { name: "Agents", path: "/admin/agents" },
-        { name: "Délégations", path: "/admin/delegations" },
-      ],
-    },
-  ],
-};
-
 type AuthUser = {
-  roles?: string[];
   permissions?: string[];
-  agent?: {
-    delegations?: Array<{ role_name?: string | null }>;
-  };
 };
 
-const ADMIN_SUBITEMS = [
-  { name: "Utilisateurs", path: "/admin/users", permission: "USERS_MANAGE" },
-  { name: "Permissions", path: "/admin/permissions", permission: "PERMISSIONS_MANAGE" },
-  { name: "Hiérarchie", path: "/admin/hierarchy", permission: "AGENTS_MANAGE" },
-  { name: "Directions", path: "/admin/directions", permission: "DIRECTIONS_MANAGE" },
-  { name: "Départements", path: "/admin/departements", permission: "DEPARTEMENTS_MANAGE" },
-  { name: "Services", path: "/admin/services", permission: "SERVICES_MANAGE" },
-  { name: "Agents", path: "/admin/agents", permission: "AGENTS_MANAGE" },
+const ADMIN_SUBITEMS: SubItem[] = [
+  {
+    name: "Utilisateurs & Hiérarchie",
+    path: "/admin/people",
+    icon: <UserIcon />,
+    permissions: ["USERS_MANAGE", "AGENTS_MANAGE"],
+  },
+  { name: "Permissions", path: "/admin/permissions", icon: <LockIcon />, permission: "PERMISSIONS_MANAGE" },
+  { name: "Directions", path: "/admin/directions", icon: <FolderIcon />, permission: "DIRECTIONS_MANAGE" },
+  { name: "Départements", path: "/admin/departements", icon: <BoxIconLine />, permission: "DEPARTEMENTS_MANAGE" },
+  { name: "Services", path: "/admin/services", icon: <PlugInIcon />, permission: "SERVICES_MANAGE" },
 ];
 
-function normalizeRole(x: unknown): Role | null {
-  if (!x) return null;
-  const s = String(x).trim().toUpperCase();
-  return (ROLES as readonly string[]).includes(s) ? (s as Role) : null;
+const MENU_ITEMS: MenuItem[] = [
+  {
+    section: "main",
+    icon: <GridIcon />,
+    name: "Dashboard",
+    path: "/",
+    permissions: ["DASHBOARD_VIEW_SELF", "DASHBOARD_VIEW_ALL"],
+  },
+  {
+    section: "main",
+    icon: <PageIcon />,
+    name: "Demandes",
+    subItems: [
+      { name: "Mes demandes", path: "/demandes/my", icon: <FileIcon />, permission: "DEMANDE_LIST_SELF" },
+      { name: "Toutes les demandes", path: "/demandes/all", icon: <FileIcon />, permission: "DEMANDE_LIST" },
+      { name: "Nouvelle demande", path: "/demandes/create", icon: <PlusIcon />, permission: "DEMANDE_CREATE", new: true },
+    ],
+  },
+  {
+    section: "main",
+    icon: <ListIcon />,
+    name: "Validations",
+    subItems: [
+      { name: "En attente", path: "/validations/pending", icon: <TimeIcon />, permission: "VALIDATION_LIST_PENDING" },
+      { name: "Historique", path: "/validations/done", icon: <CheckCircleIcon />, permission: "VALIDATION_LIST_DONE" },
+      { name: "Délégations", path: "/delegations", icon: <GroupIcon />, permissions: ["VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"] },
+    ],
+  },
+  {
+    section: "main",
+    icon: <TableIcon />,
+    name: "Réceptions",
+    subItems: [
+      { name: "Réceptions", path: "/receptions", icon: <FileIcon />, permissions: ["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL"] },
+      { name: "En attente", path: "/receptions/pending", icon: <TimeIcon />, permissions: ["RECEPTION_VISA_DIRECTEUR", "RECEPTION_VISA_DAF"] },
+      { name: "Effectuées", path: "/receptions/done", icon: <CheckCircleIcon />, permissions: ["RECEPTION_VISA_DIRECTEUR", "RECEPTION_VISA_DAF"] },
+    ],
+  },
+  {
+    section: "main",
+    icon: <TableIcon />,
+    name: "Paiements",
+    subItems: [
+      { name: "En attente", path: "/paiements/pending", icon: <TimeIcon />, permission: "PAIEMENT_LIST" },
+      { name: "Effectuées", path: "/paiements/done", icon: <CheckCircleIcon />, permission: "PAIEMENT_LIST" },
+    ],
+  },
+  {
+    section: "main",
+    icon: <BoxCubeIcon />,
+    name: "Administration",
+    subItems: ADMIN_SUBITEMS,
+  },
+  { section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" },
+];
+
+function normalizeCode(value: unknown) {
+  return String(value || "").trim().toUpperCase();
 }
 
-function mergeSubItems(a: SubItem[] = [], b: SubItem[] = []): SubItem[] {
-  const map = new Map();
-  a.forEach((x) => map.set(x.path, x));
-  b.forEach((x) => map.set(x.path, x));
-  return Array.from(map.values());
-}
-
-function mergeMenus(a: MenuItem[] = [], b: MenuItem[] = []): MenuItem[] {
-  const map = new Map();
-
-  const add = (items: MenuItem[]) => {
-    items.forEach((it) => {
-      const key = it.name;
-      if (!map.has(key)) {
-        map.set(key, { ...it, subItems: it.subItems ? [...it.subItems] : undefined });
-      } else {
-        const ex = map.get(key) as MenuItem | undefined;
-        if (!ex) return;
-        ex.section = ex.section ?? it.section ?? "main";
-        ex.path = ex.path ?? it.path;
-        ex.icon = ex.icon ?? it.icon;
-        if (it.subItems?.length) ex.subItems = mergeSubItems(ex.subItems ?? [], it.subItems);
-      }
-    });
-  };
-
-  add(a);
-  add(b);
-
-  return Array.from(map.values());
-}
-
-const BASE_MENU: MenuItem[] = [{ section: "others", icon: <UserCircleIcon />, name: "Profil", path: "/profile" }];
-
-/**
- * Menus = union des rôles effectifs (multi-profils + délégations).
- */
-function buildMenu(roles: Role[] = []): MenuItem[] {
-  let menu: MenuItem[] = [...BASE_MENU];
-  const uniq = Array.from(new Set(roles.filter(Boolean)));
-
-  uniq.forEach((r) => {
-    menu = mergeMenus(menu, MENUS_BY_ROLE[r] ?? []);
-  });
-
-  return menu;
+function normalizeAppliesTo(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((v) => String(v || "").trim().toLowerCase()).filter(Boolean)));
 }
 
 export default function AppSidebar() {
@@ -268,48 +136,84 @@ export default function AppSidebar() {
   const location = useLocation();
   const { user } = useAuth() as { user?: AuthUser };
 
+  const [permissionDefs, setPermissionDefs] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      try {
+        const res = await listPermissions();
+        if (!active) return;
+        if (res?.success) {
+          setPermissionDefs(res.data || res.items || []);
+        }
+      } catch {
+        if (active) setPermissionDefs([]);
+      }
+    };
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const userPermissions = useMemo(
-    () => (user?.permissions || []).map((p) => String(p || "").trim()).filter(Boolean),
+    () => (user?.permissions || []).map((p) => normalizeCode(p)).filter(Boolean),
     [user?.permissions]
   );
-  const hasPermission = useCallback((code: string) => userPermissions.includes(code), [userPermissions]);
 
-  const effectiveRoles = useMemo(() => {
-    const base = Array.isArray(user?.roles) ? user.roles : [];
-    const delegated = (user?.agent?.delegations ?? [])
-      .map((d) => normalizeRole(d?.role_name))
-      .filter((x): x is Role => Boolean(x));
-    const normalized = base
-      .map((r) => normalizeRole(r))
-      .filter((x): x is Role => Boolean(x));
-    return Array.from(new Set([...normalized, ...delegated]));
-  }, [user?.roles, user?.agent?.delegations]);
+  const userPermissionSet = useMemo(() => new Set(userPermissions), [userPermissions]);
+
+  const permissionMetaMap = useMemo(() => {
+    const map = new Map();
+    (permissionDefs || []).forEach((p) => {
+      const code = normalizeCode(p?.code);
+      if (!code) return;
+      const appliesTo = normalizeAppliesTo(p?.appliesTo);
+      map.set(code, appliesTo);
+    });
+    return map;
+  }, [permissionDefs]);
+
+  const hasMenuPermission = useCallback(
+    (code: string) => {
+      const c = normalizeCode(code);
+      if (!c) return false;
+      if (!userPermissionSet.has(c)) return false;
+      if (!permissionMetaMap.size) return true; // fallback: allow if meta not loaded
+      const appliesTo = permissionMetaMap.get(c);
+      if (!appliesTo || !appliesTo.length) return true;
+      return appliesTo.includes("menu");
+    },
+    [permissionMetaMap, userPermissionSet]
+  );
+
+  const canAccess = useCallback(
+    (item: PermissionSpec) => {
+      if (item.permission) return hasMenuPermission(item.permission);
+      if (Array.isArray(item.permissions)) return item.permissions.some((c) => hasMenuPermission(c));
+      if (Array.isArray(item.permissionsAll)) return item.permissionsAll.every((c) => hasMenuPermission(c));
+      return true;
+    },
+    [hasMenuPermission]
+  );
 
   const computedMenu = useMemo(() => {
-    // base menu from roles/delgations
-    let out = buildMenu(effectiveRoles);
+    const filterSubItems = (subItems: SubItem[]) => subItems.filter((s) => canAccess(s));
 
-    // remove old role-based admin menu (we re-add it based on permissions)
-    out = out.filter((x) => String(x?.name || "").toLowerCase() !== "administration");
+    const filterMenuItems = (items: MenuItem[]) =>
+      items.reduce((acc: MenuItem[], item) => {
+        const subItems = item.subItems ? filterSubItems(item.subItems) : undefined;
+        if (subItems && subItems.length === 0) return acc;
+        if (!subItems && !canAccess(item)) return acc;
+        acc.push({ ...item, subItems });
+        return acc;
+      }, []);
 
-    const adminSubItems = ADMIN_SUBITEMS.filter((s) => hasPermission(s.permission)).map(({ name, path }) => ({
-      name,
-      path,
-    }));
-
-    if (adminSubItems.length) {
-      out = mergeMenus(out, [
-        {
-          section: "main",
-          icon: <BoxCubeIcon />,
-          name: "Administration",
-          subItems: adminSubItems,
-        },
-      ]);
-    }
-
-    return out;
-  }, [effectiveRoles, hasPermission]);
+    return filterMenuItems(MENU_ITEMS);
+  }, [canAccess]);
 
   const navItems = useMemo(
     () => computedMenu.filter((x) => (x.section ?? "main") === "main"),
@@ -329,7 +233,7 @@ export default function AppSidebar() {
     setOpenSubmenus((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // ✅ auto-open si route active (submenu)
+  // ? auto-open si route active (submenu)
   useEffect(() => {
     const active: Record<string, boolean> = {};
 
@@ -366,8 +270,7 @@ export default function AppSidebar() {
       }
       return active;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+  }, [location.pathname, navItems, othersItems]);
 
   const renderItems = (items: MenuItem[], type: string) => (
     <ul className="flex flex-col gap-4">
@@ -443,7 +346,8 @@ export default function AppSidebar() {
                             : "menu-dropdown-item-inactive"
                         }`}
                       >
-                        {sub.name}
+                        <span className="[&_svg]:size-4">{sub.icon}</span>
+                        <span>{sub.name}</span>
                       </Link>
                     </li>
                   ))}
@@ -466,8 +370,8 @@ export default function AppSidebar() {
     >
       <div className={`py-8 flex ${!isExpanded && !isHovered ? "lg:justify-center" : "justify-start"}`}>
         <Link to="/">
-          <img className="dark:hidden" src="/images/logo/logo.svg" alt="Logo" width={150} height={40} />
-          <img className="hidden dark:block" src="/images/logo/logo-dark.svg" alt="Logo" width={150} height={40} />
+          <img className="dark:hidden" src="/logo.png" alt="Logo" width={150} height={40} />
+          <img className="hidden dark:block" src="/logo.png" alt="Logo" width={150} height={40} />
         </Link>
       </div>
 
@@ -503,3 +407,4 @@ export default function AppSidebar() {
     </aside>
   );
 }
+

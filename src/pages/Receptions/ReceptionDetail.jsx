@@ -115,8 +115,9 @@ export default function ReceptionDetail() {
   useEffect(() => { if (reception?.id) fetchDocs(reception.id); }, [reception?.id]);
 
   const directorByDelegation = delegatedRoles.includes("DIRECTEUR");
-  const directorRoleOnly = roles.includes("DIRECTEUR") && !roles.some((r) => ["DAF", "DG", "DGA"].includes(r));
-  const canVisaDirecteur = (directorRoleOnly || directorByDelegation || roles.includes("ADMIN")) && !reception?.visa_directeur_id;
+  const canVisaDirecteur =
+    (roles.includes("DIRECTEUR") || directorByDelegation || roles.includes("ADMIN")) &&
+    !reception?.visa_directeur_id;
   const canVisaDaf = (roles.includes("DAF") || roles.includes("ADMIN")) && !!reception?.visa_directeur_id && !reception?.visa_daf_id;
 
   const doVisa = async (kind, commentaire) => {

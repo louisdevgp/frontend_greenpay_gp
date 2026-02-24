@@ -84,7 +84,10 @@ export default function ReceptionsList({ mode = "all" }) {
   const isDirectorOnlyView = effectiveRoles.has("DIRECTEUR") && !effectiveRoles.has("DAF");
   const isDoneForDaf = (r) => !!r?.visa_daf_id;
   const isPendingForDaf = (r) => !!r?.visa_directeur_id && !r?.visa_daf_id;
-  const showDemandes = modeKey === "pending" && isDirectorOnlyView;
+  const isPendingForDirector = (r) => !r?.visa_directeur_id;
+  const canShowDemandes = modeKey === "pending" && isDirectorOnlyView;
+  const [pendingView, setPendingView] = useState("receptions");
+  const showDemandes = canShowDemandes && pendingView === "demandes";
 
   const fetch = async () => {
     setLoading(true);
@@ -116,7 +119,11 @@ export default function ReceptionsList({ mode = "all" }) {
         const rows = res.data || [];
         const scoped =
           modeKey === "pending"
-            ? rows.filter((r) => isPendingForDaf(r))
+            ? rows.filter((r) => {
+                const wantsDirector = effectiveRoles.has("DIRECTEUR") && isPendingForDirector(r);
+                const wantsDaf = effectiveRoles.has("DAF") && isPendingForDaf(r);
+                return wantsDirector || wantsDaf;
+              })
             : modeKey === "done"
               ? (isDirectorOnlyView ? rows : rows.filter((r) => isDoneForDaf(r)))
               : rows;
@@ -196,9 +203,10 @@ export default function ReceptionsList({ mode = "all" }) {
     effectiveRoles.has("DIRECTEUR") ||
     effectiveRoles.has("DEMANDEUR");
   const title =
-    modeKey === "pending" ? "Réceptions en attente"
-      : modeKey === "done" ? "Réceptions effectuées"
-        : "Réceptions";
+    showDemandes ? "Demandes éligibles à réception"
+      : modeKey === "pending" ? "Réceptions en attente"
+        : modeKey === "done" ? "Réceptions effectuées"
+          : "Réceptions";
   const emptyMessage =
     showDemandes ? "Aucune demande éligible."
       : modeKey === "pending" ? "Aucune réception en attente."
@@ -250,6 +258,32 @@ export default function ReceptionsList({ mode = "all" }) {
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">{title}</h1>
         <div className="flex items-center gap-2">
+          {canShowDemandes ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingView("receptions")}
+                className={`px-3 py-2 text-sm rounded-lg border ${
+                  pendingView === "receptions"
+                    ? "bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white"
+                    : "border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+                }`}
+              >
+                Réceptions à viser
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingView("demandes")}
+                className={`px-3 py-2 text-sm rounded-lg border ${
+                  pendingView === "demandes"
+                    ? "bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white"
+                    : "border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+                }`}
+              >
+                Demandes éligibles
+              </button>
+            </div>
+          ) : null}
           <ExportButton
             onExport={handleExport}
             disabled={!filtered.length}

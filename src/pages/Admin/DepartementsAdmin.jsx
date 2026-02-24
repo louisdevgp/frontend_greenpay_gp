@@ -4,6 +4,7 @@ import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import { Modal } from "../../components/ui/modal";
+import ConfirmActionModal from "../../components/common/ConfirmActionModal";
 import { emitToast } from "../../services/toastBus";
 import { listDirections } from "../../services/directions.service";
 import { createDepartement, deleteDepartement, listDepartements, updateDepartement } from "../../services/departements.service";
@@ -22,6 +23,8 @@ export default function DepartementsAdmin() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ nom: "", code: "", directionIdOrUuid: "" });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -114,11 +117,16 @@ export default function DepartementsAdmin() {
     }
   };
 
-  const remove = async (row) => {
-    if (!row?.id && !row?.uuid) return;
+  const requestDelete = (row) => {
+    setDeleteTarget(row || null);
+    setDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget?.id && !deleteTarget?.uuid) return;
     setSaving(true);
     try {
-      const idOrUuid = row.uuid || row.id;
+      const idOrUuid = deleteTarget.uuid || deleteTarget.id;
       const res = await deleteDepartement(idOrUuid);
       if (!res?.success) throw new Error(res?.message || "Erreur suppression département");
       emitToast({ variant: "success", message: "Département supprimé" });
@@ -127,6 +135,8 @@ export default function DepartementsAdmin() {
       emitToast({ variant: "error", message: e?.message || "Erreur" });
     } finally {
       setSaving(false);
+      setDeleteOpen(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -210,7 +220,7 @@ export default function DepartementsAdmin() {
                           Modifier
                         </button>
                         <button
-                          onClick={() => remove(r)}
+                          onClick={() => requestDelete(r)}
                           className="px-3 py-1.5 text-xs font-medium border border-red-200 text-red-700 rounded-lg dark:border-red-900/40 dark:text-red-300"
                         >
                           Supprimer
@@ -291,6 +301,21 @@ export default function DepartementsAdmin() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmActionModal
+        open={deleteOpen}
+        title="Supprimer le département"
+        message={deleteTarget?.nom ? `Confirmer la suppression du département "${deleteTarget.nom}" ?` : "Confirmer la suppression du département ?"}
+        confirmLabel="Supprimer"
+        confirmVariant="danger"
+        loading={saving}
+        onClose={() => {
+          if (saving) return;
+          setDeleteOpen(false);
+          setDeleteTarget(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </>
   );
 }

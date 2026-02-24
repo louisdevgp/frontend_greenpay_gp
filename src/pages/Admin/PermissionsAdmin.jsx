@@ -10,6 +10,21 @@ function uniq(arr) {
   return Array.from(new Set(arr));
 }
 
+function normalizeAppliesTo(value) {
+  const arr = Array.isArray(value) ? value : [];
+  const normalized = arr.map((v) => String(v || "").trim().toLowerCase()).filter(Boolean);
+  if (!normalized.length) return ["action"];
+  return Array.from(new Set(normalized));
+}
+
+function scopeLabel(appliesTo) {
+  const hasMenu = appliesTo.includes("menu");
+  const hasAction = appliesTo.includes("action");
+  if (hasMenu && hasAction) return "menu+action";
+  if (hasMenu) return "menu";
+  return "action";
+}
+
 export default function PermissionsAdmin() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -185,6 +200,11 @@ export default function PermissionsAdmin() {
                 Après modification, les nouvelles règles s’appliquent immédiatement (API). Pour éviter de vous bloquer,
                 gardez toujours le rôle ADMIN attribué au moins à un utilisateur.
               </p>
+              <p className="mt-2">
+                Type: <span className="font-medium">menu</span> = affiche un menu; {" "}
+                <span className="font-medium">action</span> = autorise une action API; {" "}
+                <span className="font-medium">menu+action</span> = les deux.
+              </p>
             </div>
           </div>
         </div>
@@ -195,6 +215,9 @@ export default function PermissionsAdmin() {
             {(permissions || []).map((perm) => {
               const code = String(perm.code || "").trim().toUpperCase();
               const label = String(perm.label || "").trim() || code;
+              const moduleName = String(perm.module || "").trim() || "Other";
+              const appliesTo = normalizeAppliesTo(perm.appliesTo);
+              const typeLabel = scopeLabel(appliesTo);
               const checked = checkedCodes.includes(code);
               return (
                 <label
@@ -211,6 +234,9 @@ export default function PermissionsAdmin() {
                   <span className="min-w-0">
                     <span className="block text-sm text-gray-800 dark:text-gray-100 truncate">{label}</span>
                     <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{code}</span>
+                    <span className="block text-xs text-gray-400 dark:text-gray-500 truncate">
+                      {moduleName} - {typeLabel}
+                    </span>
                   </span>
                 </label>
               );
