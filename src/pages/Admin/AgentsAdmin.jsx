@@ -13,7 +13,7 @@ import { listDepartements } from "../../services/departements.service";
 import { listServices } from "../../services/services.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
 
-export default function AgentsAdmin() {
+export default function AgentsAdmin({ embedded = false } = {}) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -90,6 +90,10 @@ export default function AgentsAdmin() {
       sheetName: "Agents",
     });
   };
+
+  const TitleTag = embedded ? "h2" : "h1";
+  const titleClass = embedded ? "text-lg font-semibold text-gray-900 dark:text-white/90" : "text-xl font-semibold text-gray-900 dark:text-white/90";
+  const descClass = embedded ? "mt-1 text-xs text-gray-500 dark:text-gray-400" : "mt-1 text-sm text-gray-500 dark:text-gray-400";
 
   useEffect(() => {
     fetchAgents();
@@ -202,13 +206,13 @@ export default function AgentsAdmin() {
 
   return (
     <>
-      <PageMeta title="Administration - Agents" description="Gestion des agents" />
-      <FullscreenLoader show={loading || saving} label={saving ? "Enregistrement..." : "Chargement..."} />
+      {!embedded && <PageMeta title="Administration - Agents" description="Gestion des agents" />}
+      {!embedded && <FullscreenLoader show={loading || saving} label={saving ? "Enregistrement..." : "Chargement..."} />}
 
       <div className="space-y-4">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white/90">Agents</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Gestion des agents et manager actuel.</p>
+          <TitleTag className={titleClass}>Agents</TitleTag>
+          <p className={descClass}>Gestion des agents et manager actuel.</p>
         </div>
 
         <div className="flex items-center justify-end gap-2">
@@ -227,6 +231,12 @@ export default function AgentsAdmin() {
         {error ? (
           <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
             {error}
+          </div>
+        ) : null}
+
+        {embedded && (loading || saving) ? (
+          <div className="px-4 py-3 text-sm rounded-lg bg-gray-50 text-gray-700 dark:bg-gray-800/60 dark:text-gray-200">
+            {saving ? "Enregistrement..." : "Chargement..."}
           </div>
         ) : null}
 

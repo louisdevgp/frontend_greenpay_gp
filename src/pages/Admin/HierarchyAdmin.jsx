@@ -6,7 +6,7 @@ import { emitToast } from "../../services/toastBus";
 import { listAgents, setAgentManager } from "../../services/agents.admin.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
 
-export default function HierarchyAdmin() {
+export default function HierarchyAdmin({ embedded = false } = {}) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -78,13 +78,17 @@ export default function HierarchyAdmin() {
 
   return (
     <>
-      <PageMeta title="Administration - Hiérarchie" description="Gestion des hiérarchies" />
-      <FullscreenLoader show={loading || saving} label={saving ? "Enregistrement..." : "Chargement..."} />
+      {!embedded && <PageMeta title="Administration - Hiérarchie" description="Gestion des hiérarchies" />}
+      {!embedded && <FullscreenLoader show={loading || saving} label={saving ? "Enregistrement..." : "Chargement..."} />}
 
       <div className="space-y-4">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white/90">Hiérarchie</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Définir le manager actuel d’un agent.</p>
+          <h2 className={embedded ? "text-lg font-semibold text-gray-900 dark:text-white/90" : "text-xl font-semibold text-gray-900 dark:text-white/90"}>
+            Hiérarchie
+          </h2>
+          <p className={embedded ? "mt-1 text-xs text-gray-500 dark:text-gray-400" : "mt-1 text-sm text-gray-500 dark:text-gray-400"}>
+            Définir le manager actuel d’un agent.
+          </p>
         </div>
 
         <div className="flex justify-end">
@@ -93,6 +97,12 @@ export default function HierarchyAdmin() {
             disabled={!agents.length}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
           />        </div>
+
+        {embedded && (loading || saving) ? (
+          <div className="px-4 py-3 text-sm rounded-lg bg-gray-50 text-gray-700 dark:bg-gray-800/60 dark:text-gray-200">
+            {saving ? "Enregistrement..." : "Chargement..."}
+          </div>
+        ) : null}
 
         {error ? (
           <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">

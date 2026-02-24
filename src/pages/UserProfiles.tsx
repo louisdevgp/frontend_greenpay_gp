@@ -25,7 +25,7 @@ export default function UserProfiles() {
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-4">
                 <div className="h-14 w-14 overflow-hidden rounded-full border border-gray-200 dark:border-gray-800">
-                  <img src="/images/user/owner.jpg" alt="User" />
+                  <img src="/images/user/user-01.jpg" alt="User" />
                 </div>
                 <div>
                   <div className="text-lg font-semibold text-gray-800 dark:text-white/90">

@@ -49,9 +49,7 @@ import ReceptionsList from "./pages/Receptions/ReceptionsList";
 import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
 
 // admin
-import UsersAdmin from "./pages/Admin/UsersAdmin";
-import AgentsAdmin from "./pages/Admin/AgentsAdmin";
-import HierarchyAdmin from "./pages/Admin/HierarchyAdmin";
+import PeopleAdmin from "./pages/Admin/PeopleAdmin";
 import DelegationsAdmin from "./pages/Admin/DelegationsAdmin";
 import DirectionsAdmin from "./pages/Admin/DirectionsAdmin";
 import DepartementsAdmin from "./pages/Admin/DepartementsAdmin";
@@ -134,18 +132,18 @@ export default function App() {
               </Route>
 
               {/* Admin : piloté par permissions (DB) */}
-              <Route element={<PermissionGuard allow={["USERS_MANAGE"]} />}>
-                <Route path="/admin/users" element={<UsersAdmin />} />
+              <Route element={<PermissionGuard allow={["USERS_MANAGE", "AGENTS_MANAGE"]} />}>
+                <Route path="/admin/people" element={<PeopleAdmin />} />
+                <Route path="/admin/users" element={<PeopleAdmin />} />
+                <Route path="/admin/agents" element={<PeopleAdmin />} />
+                <Route path="/admin/hierarchy" element={<PeopleAdmin />} />
               </Route>
 
               <Route element={<PermissionGuard allow={["PERMISSIONS_MANAGE"]} />}>
                 <Route path="/admin/permissions" element={<PermissionsAdmin />} />
               </Route>
 
-              <Route element={<PermissionGuard allow={["AGENTS_MANAGE"]} />}>
-                <Route path="/admin/hierarchy" element={<HierarchyAdmin />} />
-                <Route path="/admin/agents" element={<AgentsAdmin />} />
-              </Route>
+              {/* anciennes pages dédiées supprimées au profit de la vue unique */}
 
               <Route element={<PermissionGuard allow={["DIRECTIONS_MANAGE"]} />}>
                 <Route path="/admin/directions" element={<DirectionsAdmin />} />

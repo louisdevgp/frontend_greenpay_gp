@@ -14,7 +14,27 @@ function uniq(arr) {
   return Array.from(new Set((arr || []).filter(Boolean)));
 }
 
-export default function UsersAdmin() {
+function normalizeRoleName(role) {
+  return String(role || "").trim().toUpperCase();
+}
+
+function getPrimaryRole(user) {
+  const raw = user?.primaryRole || user?.agent?.roles?.name || "";
+  const normalized = normalizeRoleName(raw);
+  return normalized || "";
+}
+
+function getSecondaryRoles(user) {
+  const primary = getPrimaryRole(user);
+  const source =
+    Array.isArray(user?.secondaryRoles) && user.secondaryRoles.length
+      ? user.secondaryRoles
+      : user?.roles || [];
+  const filtered = source.filter((r) => normalizeRoleName(r) !== primary);
+  return uniq(filtered);
+}
+
+export default function UsersAdmin({ embedded = false } = {}) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -58,6 +78,10 @@ export default function UsersAdmin() {
     }
   };
 
+  const TitleTag = embedded ? "h2" : "h1";
+  const titleClass = embedded ? "text-lg font-semibold text-gray-900 dark:text-white/90" : "text-xl font-semibold text-gray-900 dark:text-white/90";
+  const descClass = embedded ? "mt-1 text-xs text-gray-500 dark:text-gray-400" : "mt-1 text-sm text-gray-500 dark:text-gray-400";
+
   useEffect(() => {
     fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -69,7 +93,7 @@ export default function UsersAdmin() {
       nom: u?.nom || "",
       prenom: u?.prenom || "",
       is_active: !!u?.is_active,
-      roles: uniq(u?.roles || []),
+      roles: getSecondaryRoles(u),
     });
     setEditOpen(true);
   };
@@ -81,7 +105,8 @@ export default function UsersAdmin() {
     { header: "Email", value: (u) => u?.email || "-" },
     { header: "Nom", value: (u) => u?.nom || "-" },
     { header: "Prénom", value: (u) => u?.prenom || "-" },
-    { header: "Rôles", value: (u) => (u?.roles || []).join(", ") || "-" },
+    { header: "Rôle principal", value: (u) => getPrimaryRole(u) || "-" },
+    { header: "Rôles secondaires", value: (u) => getSecondaryRoles(u).join(", ") || "-" },
     { header: "Actif", value: (u) => (u?.is_active ? "Oui" : "Non") },
   ];
   const handleExport = () => {
@@ -107,7 +132,11 @@ export default function UsersAdmin() {
       });
       if (!uRes?.success) throw new Error(uRes?.message || "Erreur update user");
 
-      const rolesRes = await setUserRoles(idOrUuid, uniq(form.roles));
+      const primary = getPrimaryRole(editUser);
+      const secondaryOnly = primary
+        ? uniq((form.roles || []).filter((r) => normalizeRoleName(r) !== primary))
+        : uniq(form.roles);
+      const rolesRes = await setUserRoles(idOrUuid, secondaryOnly);
       if (!rolesRes?.success) throw new Error(rolesRes?.message || "Erreur update rôles");
 
       emitToast({ variant: "success", message: "Utilisateur mis à jour" });
@@ -197,14 +226,14 @@ export default function UsersAdmin() {
 
   return (
     <>
-      <PageMeta title="Administration - Utilisateurs" description="Gestion des utilisateurs" />
-      <FullscreenLoader show={loading || saving} label={saving ? "Enregistrement..." : "Chargement..."} />
+      {!embedded && <PageMeta title="Administration - Utilisateurs" description="Gestion des utilisateurs" />}
+      {!embedded && <FullscreenLoader show={loading || saving} label={saving ? "Enregistrement..." : "Chargement..."} />}
 
       <div className="space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white/90">Utilisateurs</h1>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Liste et gestion des utilisateurs.</p>
+            <TitleTag className={titleClass}>Utilisateurs</TitleTag>
+            <p className={descClass}>Liste et gestion des utilisateurs.</p>
           </div>
 
           <div className="flex items-end gap-2">
@@ -250,6 +279,12 @@ export default function UsersAdmin() {
           </div>
         </div>
 
+        {embedded && (loading || saving) ? (
+          <div className="px-4 py-3 text-sm rounded-lg bg-gray-50 text-gray-700 dark:bg-gray-800/60 dark:text-gray-200">
+            {saving ? "Enregistrement..." : "Chargement..."}
+          </div>
+        ) : null}
+
         {error ? (
           <div className="px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
             {error}
@@ -263,7 +298,8 @@ export default function UsersAdmin() {
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Nom</th>
                 <th className="px-4 py-3">Prénom</th>
-                <th className="px-4 py-3">Rôles</th>
+                <th className="px-4 py-3">Rôle principal</th>
+                <th className="px-4 py-3">Rôles secondaires</th>
                 <th className="px-4 py-3">Actif</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -271,7 +307,7 @@ export default function UsersAdmin() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={6}>
+                  <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={7}>
                     Aucun utilisateur.
                   </td>
                 </tr>
@@ -281,7 +317,8 @@ export default function UsersAdmin() {
                     <td className="px-4 py-3">{u.email}</td>
                     <td className="px-4 py-3">{u.nom || "-"}</td>
                     <td className="px-4 py-3">{u.prenom || "-"}</td>
-                    <td className="px-4 py-3">{(u.roles || []).join(", ") || "-"}</td>
+                    <td className="px-4 py-3">{getPrimaryRole(u) || "-"}</td>
+                    <td className="px-4 py-3">{getSecondaryRoles(u).join(", ") || "-"}</td>
                     <td className="px-4 py-3">{u.is_active ? "Oui" : "Non"}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
@@ -363,7 +400,10 @@ export default function UsersAdmin() {
           </label>
 
           <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Rôles</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Rôles secondaires</p>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">
+              Le rôle principal est défini dans la fiche Agent.
+            </p>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {roleNames.map((rn) => {
                 const checked = (createForm.roles || []).includes(rn);
@@ -505,7 +545,14 @@ export default function UsersAdmin() {
           </label>
 
           <div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Rôles</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Rôle principal (agent)</p>
+            <div className="mt-1 text-sm text-gray-800 dark:text-gray-200">
+              {getPrimaryRole(editUser) || "-"}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Rôles secondaires</p>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {roleNames.map((rn) => {
                 const checked = (form.roles || []).includes(rn);
