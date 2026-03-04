@@ -14,6 +14,12 @@ function round2(v) {
   return Math.round(Number(v) * 100) / 100;
 }
 
+function normalizeConditionSource(value) {
+  if (!value) return "DEMANDEUR";
+  const v = String(value).trim().toUpperCase();
+  return v === "DAF" ? "DAF" : "DEMANDEUR";
+}
+
 const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "receptionnee"]);
 
 function isPayableStatus(statut) {
@@ -26,12 +32,14 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     type_paiement: "total",
     montant: "",
     moyen_paiement: "",
+    conditions_source: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [demandes, setDemandes] = useState([]);
   const [demandeResolved, setDemandeResolved] = useState(null);
   const autoMoyenRef = useRef("");
+  const autoSourceRef = useRef("");
   const [uploadType, setUploadType] = useState("recu");
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
@@ -83,11 +91,13 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
       type_paiement: "total",
       montant: "",
       moyen_paiement: "",
+      conditions_source: "",
     });
     setError("");
     setLoading(false);
     setDemandeResolved(null);
     autoMoyenRef.current = "";
+    autoSourceRef.current = "";
     setUploadType("recu");
     setUploadTypeAutre("");
     setUploadFiles([]);
@@ -127,6 +137,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
         type_paiement: form.type_paiement,
         montant: Number(form.montant),
         moyen_paiement: form.moyen_paiement,
+        conditions_source: conditionsSource,
       });
 
       if (!res?.success) throw new Error(res?.message || "Erreur création paiement");
@@ -172,14 +183,33 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     [demandeResolved?.montant_net, demandeResolved?.montant]
   );
 
+  const availableSources = useMemo(() => {
+    const sources = new Set(
+      (demandeResolved?.conditions_paiement || []).map((c) => normalizeConditionSource(c?.source))
+    );
+    return Array.from(sources);
+  }, [demandeResolved?.conditions_paiement]);
+
+  const conditionsSource = useMemo(
+    () => normalizeConditionSource(form.conditions_source || (availableSources.includes("DAF") ? "DAF" : "DEMANDEUR")),
+    [form.conditions_source, availableSources]
+  );
+  const hasDafConditions = availableSources.includes("DAF");
+
+  const conditionsForSource = useMemo(() => {
+    const all = demandeResolved?.conditions_paiement || [];
+    return all.filter((c) => normalizeConditionSource(c?.source) === conditionsSource);
+  }, [demandeResolved?.conditions_paiement, conditionsSource]);
+
+
   // Calculer les montants restants à payer pour les tranches
   const unpaid = useMemo(() => {
-    if (!demandeResolved?.conditions_paiement?.length) return [];
-    return (demandeResolved.conditions_paiement || [])
-      .filter((c) => !c.paiement_id) // Non payées
+    if (!conditionsForSource?.length) return [];
+    return (conditionsForSource || [])
+      .filter((c) => !c.paiement_id) // Non payees
       .map((c) => ({ ...c, montant_prevu: Number(c.montant_prevu) }))
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); // Tri par date
-  }, [demandeResolved?.conditions_paiement]);
+  }, [conditionsForSource]);
 
   const remainingTotal = useMemo(() => {
     return round2(unpaid.reduce((acc, c) => acc + Number(c?.montant_prevu || 0), 0));
@@ -229,6 +259,26 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
 
     autoMoyenRef.current = nextDefault;
   }, [demandeResolved?.id, demandeResolved?.daf_critere4]);
+
+  useEffect(() => {
+    if (!demandeResolved) {
+      autoSourceRef.current = "";
+      return;
+    }
+    const sources = new Set(
+      (demandeResolved?.conditions_paiement || []).map((c) => normalizeConditionSource(c?.source))
+    );
+    const nextDefault = sources.has("DAF") ? "DAF" : "DEMANDEUR";
+
+    setForm((prev) => {
+      const prevValue = String(prev.conditions_source || "");
+      const shouldReplace = !prevValue || prevValue === autoSourceRef.current;
+      if (!shouldReplace) return prev;
+      return { ...prev, conditions_source: nextDefault };
+    });
+
+    autoSourceRef.current = nextDefault;
+  }, [demandeResolved?.id, demandeResolved?.conditions_paiement]);
 
   const validateMontant = () => {
     if (!demandeResolved) return null;
@@ -324,7 +374,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type de paiement</label>
             <select
@@ -353,6 +403,19 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
             {errorMsg ? (
               <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{errorMsg}</p>
             ) : null}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Conditions</label>
+            <select
+              value={conditionsSource}
+              onChange={(e) => setForm({ ...form, conditions_source: e.target.value })}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              disabled={loading || !hasDafConditions}
+            >
+              <option value="DEMANDEUR">Demandeur</option>
+              {hasDafConditions ? <option value="DAF">DAF</option> : null}
+            </select>
           </div>
 
           <div>

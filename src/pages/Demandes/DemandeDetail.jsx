@@ -1,7 +1,8 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { getDemande, deleteDemande, closeDemande, getDemandeValidationHistory } from "../../services/demandes.services";
-import { listDocuments } from "../../services/documents.service";
+import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
+import { api } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
@@ -38,6 +39,14 @@ function formatDafCritere4(value, fallbackLabel) {
   const str = value == null ? "" : String(value).trim();
   if (!str) return { label: fallbackLabel, value: "-" };
   return { label: fallbackLabel, value: str };
+}
+
+function normalizeConditionSource(value) {
+  if (!value) return null;
+  const v = String(value).trim().toUpperCase();
+  if (v === "DAF") return "DAF";
+  if (v === "DEMANDEUR") return "DEMANDEUR";
+  return null;
 }
 
 export default function DemandeDetail() {
@@ -136,11 +145,8 @@ export default function DemandeDetail() {
     if (!demandeId) return;
     setPaiementsLoading(true);
     try {
-      const res = await fetch(`/api/paiements/by-demande/${demandeId}`, {
-        headers: { Authorization: `Bearer ${user.token}` },
-      });
-      const data = await res.json();
-      if (data.success) setPaiements(data.data || []);
+      const res = await api.get(`/paiements/by-demande/${demandeId}`);
+      if (res?.data?.success) setPaiements(res.data.data || []);
       else setPaiements([]);
     } catch (e) {
       setPaiements([]);
@@ -281,24 +287,11 @@ export default function DemandeDetail() {
       }
 
       setUploading(true);
-      const formData = new FormData();
-      for (const file of uploadFiles) {
-        formData.append("files", file);
-      }
-      formData.append("demande_id", String(demande.id));
-      formData.append("type_document", typeDoc);
-
-      const res = await fetch("/api/documents/upload", {
-        method: "POST",
-        headers: {
-          // Note: Ne pas définir Content-Type, le navigateur le fait automatiquement avec le boundary pour FormData
-          Authorization: `Bearer ${user.token}`,
-        },
-        body: formData,
+      await uploadManyDocuments({
+        files: uploadFiles,
+        type_document: typeDoc,
+        demande_id: demande.id,
       });
-
-      const data = await res.json();
-      if (!data.success) throw new Error(data?.message || "Upload échoué");
       setUploadFiles([]);
       setUploadTypeAutre("");
       await fetchDocs(demande.id); // Recharger les documents
@@ -406,12 +399,41 @@ export default function DemandeDetail() {
     [paiements]
   );
 
+  const conditionsBySource = useMemo(() => {
+    const map = new Map();
+    const all = demande?.conditions_paiement || [];
+    for (const cond of all) {
+      const source = normalizeConditionSource(cond?.source) || "DEMANDEUR";
+      const list = map.get(source) || [];
+      list.push(cond);
+      map.set(source, list);
+    }
+    for (const [key, list] of map.entries()) {
+      list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      map.set(key, list);
+    }
+    return map;
+  }, [demande?.conditions_paiement]);
+
+  const conditionsSourceFromPaiements = useMemo(() => {
+    for (const p of paiements || []) {
+      const src = normalizeConditionSource(p?.conditions_source);
+      if (src) return src;
+    }
+    return null;
+  }, [paiements]);
+
+  const activeConditionsSource = useMemo(() => {
+    if (conditionsSourceFromPaiements) return conditionsSourceFromPaiements;
+    if ((conditionsBySource.get("DAF") || []).length) return "DAF";
+    if ((conditionsBySource.get("DEMANDEUR") || []).length) return "DEMANDEUR";
+    return null;
+  }, [conditionsSourceFromPaiements, conditionsBySource]);
+
   const conditionsPaiement = useMemo(() => {
-    if (!demande) return [];
-    return [...(demande.conditions_paiement || [])].sort((a, b) =>
-      new Date(a.created_at) - new Date(b.created_at)
-    );
-  }, [demande]);
+    if (!activeConditionsSource) return [];
+    return conditionsBySource.get(activeConditionsSource) || [];
+  }, [conditionsBySource, activeConditionsSource]);
 
   const timelineItems = useMemo(() => {
     const items = Array.isArray(validationHistory) ? [...validationHistory] : [];
@@ -896,6 +918,11 @@ export default function DemandeDetail() {
           {hasConditionsPaiement ? (
             <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
               <div className="text-sm font-medium text-gray-800 dark:text-white/90">Conditions de paiement</div>
+              {activeConditionsSource ? (
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Source: {activeConditionsSource === "DAF" ? "DAF" : "Demandeur"}
+                </div>
+              ) : null}
               
               <div className="mt-3 overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">

@@ -7,7 +7,31 @@ const inferredHost = typeof window !== "undefined" ? window.location.hostname : 
 const inferredApiPort = import.meta.env.VITE_API_PORT || "8000";
 const defaultApiUrl = `http://${inferredHost}:${inferredApiPort}/api`;
 
-const BASE_URL = import.meta.env.VITE_API_URL || defaultApiUrl;
+function normalizeBaseUrl(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return defaultApiUrl;
+
+  // Relative path ("/api" or "api")
+  if (raw.startsWith("/")) return raw.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(raw)) {
+    return `/${raw.replace(/^\/+/, "")}`.replace(/\/+$/, "");
+  }
+
+  try {
+    const url = new URL(raw);
+    const path = String(url.pathname || "").replace(/\/+$/, "");
+    if (!path || path === "/") {
+      url.pathname = "/api";
+    } else if (!path.endsWith("/api")) {
+      url.pathname = `${path}/api`;
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
+}
+
+const BASE_URL = normalizeBaseUrl(import.meta.env.VITE_API_URL || defaultApiUrl);
 
 export const api = axios.create({
   baseURL: BASE_URL,

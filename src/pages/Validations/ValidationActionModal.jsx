@@ -19,6 +19,17 @@ function normalizeDafCritere4Input(value) {
   return "";
 }
 
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeConditionSource(value) {
+  if (!value) return "DEMANDEUR";
+  const v = String(value).trim().toUpperCase();
+  return v === "DAF" ? "DAF" : "DEMANDEUR";
+}
+
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
   // mode: "approve" | "reject" | "return"
   const [commentaire, setCommentaire] = useState("");
@@ -34,6 +45,10 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [budgetDisponible, setBudgetDisponible] = useState(null); // null | boolean
   const [paiementImmediat, setPaiementImmediat] = useState(null); // null | boolean
   const [dafCritere4, setDafCritere4] = useState(""); // string (moyen de paiement)
+  const [dafConditionsMode, setDafConditionsMode] = useState("100/100"); // 100/100 | 70/30 | 50/50 | custom
+  const [dafConditions, setDafConditions] = useState([
+    { label: "", pourcentage: "", condition_texte: "" },
+  ]);
 
   const title = useMemo(() => {
     if (mode === "approve") return "Valider la demande";
@@ -48,6 +63,8 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetDisponible(null);
     setPaiementImmediat(null);
     setDafCritere4("");
+    setDafConditionsMode("100/100");
+    setDafConditions([{ label: "", pourcentage: "", condition_texte: "" }]);
     setError("");
     onClose?.();
   };
@@ -60,7 +77,49 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetDisponible(demande?.budget_disponible === true ? true : demande?.budget_disponible === false ? false : null);
     setPaiementImmediat(demande?.paiement_immediat === true ? true : demande?.paiement_immediat === false ? false : null);
     setDafCritere4(normalizeDafCritere4Input(demande?.daf_critere4));
-  }, [open, isDaf, demande?.budget_prevu, demande?.budget_disponible, demande?.paiement_immediat, demande?.daf_critere4]);
+    const dafExisting = (demande?.conditions_paiement || []).filter(
+      (c) => normalizeConditionSource(c?.source) === "DAF"
+    );
+    if (dafExisting.length > 0) {
+      setDafConditionsMode("custom");
+      setDafConditions(
+        dafExisting.map((c) => ({
+          label: String(c?.label || ""),
+          pourcentage: c?.pourcentage != null ? String(c.pourcentage) : "",
+          condition_texte: c?.condition_texte ? String(c.condition_texte) : "",
+        }))
+      );
+    } else {
+      setDafConditionsMode("100/100");
+      setDafConditions([{ label: "", pourcentage: "", condition_texte: "" }]);
+    }
+  }, [
+    open,
+    isDaf,
+    demande?.budget_prevu,
+    demande?.budget_disponible,
+    demande?.paiement_immediat,
+    demande?.daf_critere4,
+    demande?.conditions_paiement,
+  ]);
+
+  const addDafCondition = () => {
+    setDafConditions((prev) => [
+      ...prev,
+      { label: "", pourcentage: "", condition_texte: "" },
+    ]);
+  };
+
+  const removeDafCondition = (index) => {
+    if (dafConditions.length <= 1) return;
+    setDafConditions((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const setDafCondition = (index, field, value) => {
+    setDafConditions((prev) =>
+      prev.map((c, idx) => (idx === index ? { ...c, [field]: value } : c))
+    );
+  };
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -76,9 +135,45 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         throw new Error("Commentaire obligatoire");
       }
 
+            let dafExtraPayload = {};
       if (mode === "approve" && isDaf) {
         if (budgetPrevu === null || budgetDisponible === null || paiementImmediat === null || !dafCritere4) {
-          throw new Error("Contrôle DAF: renseigne Budget prévu, Budget disponible, Paiement immédiat et Moyen de paiement");
+          throw new Error("Controle DAF: renseigne Budget prevu, Budget disponible, Paiement immediat et Moyen de paiement");
+        }
+
+        if (paiementImmediat === false) {
+          if (!commentaireTrimmed) throw new Error("Commentaire obligatoire si paiement non immediat");
+
+          if (dafConditionsMode === "custom") {
+            const active = dafConditions.filter((c) => {
+              const label = String(c.label || "").trim();
+              const pct = String(c.pourcentage || "").trim();
+              const txt = String(c.condition_texte || "").trim();
+              return label || pct || txt;
+            });
+            if (!active.length) {
+              throw new Error("Definir les conditions de paiement");
+            }
+            let sumPct = 0;
+            const custom = active.map((c, idx) => {
+              const label = String(c.label || "").trim();
+              const pctNum = toNumber(c.pourcentage);
+              if (!label) throw new Error(`Libelle requis (tranche ${idx + 1})`);
+              if (pctNum == null || pctNum <= 0) throw new Error(`Pourcentage invalide (tranche ${idx + 1})`);
+              sumPct += pctNum;
+              return {
+                label,
+                pourcentage: pctNum,
+                condition_texte: String(c.condition_texte || "").trim() || null,
+              };
+            });
+            if (Math.abs(sumPct - 100) > 0.01) {
+              throw new Error("La somme des pourcentages doit etre 100%");
+            }
+            dafExtraPayload = { conditions_paiement_custom: custom };
+          } else {
+            dafExtraPayload = { conditions_paiement_mode: dafConditionsMode };
+          }
         }
       }
 
@@ -92,7 +187,8 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                     budget_prevu: !!budgetPrevu,
                     budget_disponible: !!budgetDisponible,
                     paiement_immediat: !!paiementImmediat,
-                    daf_critere4: dafCritere4 ? String(dafCritere4).trim() : null, // Envoyer le moyen de paiement comme chaîne
+                    daf_critere4: dafCritere4 ? String(dafCritere4).trim() : null,
+                    ...dafExtraPayload, // Envoyer le moyen de paiement comme chaîne
                   }
                 : {}),
             })
@@ -197,6 +293,70 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                   </select>
                 </div>
               </div>
+
+              {paiementImmediat === false ? (
+                <div className="mt-3 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+                  <div className="text-xs text-gray-600 dark:text-gray-300">Conditions de paiement</div>
+                  <div className="mt-2">
+                    <select
+                      value={dafConditionsMode}
+                      onChange={(e) => setDafConditionsMode(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                    >
+                      <option value="100/100">100/100</option>
+                      <option value="70/30">70/30</option>
+                      <option value="50/50">50/50</option>
+                      <option value="custom">Personnalise</option>
+                    </select>
+                  </div>
+
+                  {dafConditionsMode === "custom" ? (
+                    <div className="mt-3 space-y-2">
+                      {dafConditions.map((c, idx) => (
+                        <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-6">
+                          <input
+                            value={c.label}
+                            onChange={(e) => setDafCondition(idx, "label", e.target.value)}
+                            className="sm:col-span-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                            placeholder={`Tranche ${idx + 1}`}
+                          />
+                          <input
+                            value={c.pourcentage}
+                            onChange={(e) => setDafCondition(idx, "pourcentage", e.target.value)}
+                            className="sm:col-span-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                            placeholder="%"
+                          />
+                          <input
+                            value={c.condition_texte}
+                            onChange={(e) => setDafCondition(idx, "condition_texte", e.target.value)}
+                            className="sm:col-span-3 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                            placeholder="Condition (optionnel)"
+                          />
+                          <div className="sm:col-span-6 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => removeDafCondition(idx)}
+                              disabled={dafConditions.length <= 1}
+                              className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
+                            >
+                              Retirer
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={addDafCondition}
+                          className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800"
+                        >
+                          Ajouter une tranche
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Ces champs seront affichés sur la fiche (PDF) de la demande.
               </div>
