@@ -5,8 +5,8 @@ import { TOAST_EVENT } from "../../services/toastBus";
 const DEFAULT_TIMEOUTS = {
   success: 4500,
   info: 4500,
-  warning: 0,
-  error: 0,
+  warning: 6000,
+  error: 6000,
 };
 
 const VARIANT_STYLES = {

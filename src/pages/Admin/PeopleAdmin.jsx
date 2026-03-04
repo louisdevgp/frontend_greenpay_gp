@@ -16,6 +16,7 @@ import {
 } from "../../services/users.admin.service";
 import { listRoles } from "../../services/roles.service";
 import { setUserRoles } from "../../services/userRoles.service";
+import { getUserPermissions, listPermissions, setUserPermissions } from "../../services/permissions.admin.service";
 import {
   createAgent,
   listAgents,
@@ -32,6 +33,10 @@ function uniq(arr) {
 
 function normalizeRoleName(role) {
   return String(role || "").trim().toUpperCase();
+}
+
+function normalizePermissionCode(code) {
+  return String(code || "").trim().toUpperCase();
 }
 
 function getPrimaryRole(user) {
@@ -54,6 +59,7 @@ export default function PeopleAdmin() {
   const { hasAnyPermission } = useAuth();
   const canUsers = hasAnyPermission(["USERS_MANAGE"]);
   const canAgents = hasAnyPermission(["AGENTS_MANAGE"]);
+  const canPerms = hasAnyPermission(["PERMISSIONS_MANAGE"]);
 
   const [loading, setLoading] = useState(true);
   const [metaLoading, setMetaLoading] = useState(true);
@@ -66,6 +72,7 @@ export default function PeopleAdmin() {
 
   const [rows, setRows] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [permissions, setPermissions] = useState([]);
   const [agents, setAgents] = useState([]);
   const [directions, setDirections] = useState([]);
   const [departements, setDepartements] = useState([]);
@@ -76,6 +83,8 @@ export default function PeopleAdmin() {
 
   const [userForm, setUserForm] = useState({ nom: "", prenom: "", is_active: true });
   const [secondaryRoles, setSecondaryRoles] = useState([]);
+  const [userPerms, setUserPerms] = useState({ allow: [], deny: [] });
+  const [userPermsLoading, setUserPermsLoading] = useState(false);
 
   const [agentForm, setAgentForm] = useState({
     user_id: "",
@@ -124,12 +133,13 @@ export default function PeopleAdmin() {
     setMetaLoading(true);
     setError("");
     try {
-      const [rRes, aRes, dirRes, depRes, srvRes] = await Promise.all([
+      const [rRes, aRes, dirRes, depRes, srvRes, pRes] = await Promise.all([
         listRoles(),
         canAgents ? listAgents({ limit: 500 }) : Promise.resolve({ success: true, items: [] }),
         canAgents ? listDirections() : Promise.resolve({ success: true, data: [] }),
         canAgents ? listDepartements() : Promise.resolve({ success: true, data: [] }),
         canAgents ? listServices() : Promise.resolve({ success: true, data: [] }),
+        canPerms ? listPermissions() : Promise.resolve({ success: true, data: [] }),
       ]);
 
       if (!rRes?.success) throw new Error(rRes?.message || "Erreur chargement rôles");
@@ -137,12 +147,14 @@ export default function PeopleAdmin() {
       if (canAgents && !dirRes?.success) throw new Error(dirRes?.message || "Erreur chargement directions");
       if (canAgents && !depRes?.success) throw new Error(depRes?.message || "Erreur chargement départements");
       if (canAgents && !srvRes?.success) throw new Error(srvRes?.message || "Erreur chargement services");
+      if (canPerms && !pRes?.success) throw new Error(pRes?.message || "Erreur chargement permissions");
 
       setRoles(rRes?.data || rRes?.items || []);
       setAgents(aRes?.items || aRes?.data?.items || []);
       setDirections(dirRes?.data || dirRes?.items || []);
       setDepartements(depRes?.data || depRes?.items || []);
       setServices(srvRes?.data || srvRes?.items || []);
+      setPermissions(pRes?.data || pRes?.items || []);
     } catch (e) {
       setError(e?.message || "Erreur");
     } finally {
@@ -204,7 +216,7 @@ export default function PeopleAdmin() {
   useEffect(() => {
     fetchMeta();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canAgents]);
+  }, [canAgents, canPerms]);
 
   useEffect(() => {
     if (!canUsers) {
@@ -229,6 +241,8 @@ export default function PeopleAdmin() {
     if (!selectedUser) {
       setUserForm({ nom: "", prenom: "", is_active: true });
       setSecondaryRoles([]);
+      setUserPerms({ allow: [], deny: [] });
+      setUserPermsLoading(false);
       return;
     }
     setUserForm({
@@ -238,6 +252,35 @@ export default function PeopleAdmin() {
     });
     setSecondaryRoles(getSecondaryRoles(selectedUser));
   }, [selectedUser]);
+
+  const fetchUserOverrides = async (u) => {
+    const userId = u?.id;
+    if (!userId || !canPerms) return;
+    setUserPermsLoading(true);
+    try {
+      const res = await getUserPermissions(userId);
+      if (!res?.success) throw new Error(res?.message || "Erreur chargement permissions utilisateur");
+      setUserPerms({
+        allow: uniq((res?.data?.allowCodes || []).map(normalizePermissionCode)),
+        deny: uniq((res?.data?.denyCodes || []).map(normalizePermissionCode)),
+      });
+    } catch (e) {
+      setUserPerms({ allow: [], deny: [] });
+      emitToast({ variant: "error", message: e?.message || "Erreur permissions utilisateur" });
+    } finally {
+      setUserPermsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedUser || !canPerms) {
+      setUserPerms({ allow: [], deny: [] });
+      setUserPermsLoading(false);
+      return;
+    }
+    fetchUserOverrides(selectedUser);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUser, canPerms]);
 
   useEffect(() => {
     if (!selectedUser) {
@@ -320,6 +363,24 @@ export default function PeopleAdmin() {
       await loadUser(idOrUuid);
     } catch (e) {
       emitToast({ variant: "error", message: e?.message || "Erreur" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveUserPermissions = async () => {
+    if (!canPerms || !selectedUser?.id) return;
+    setSaving(true);
+    try {
+      const res = await setUserPermissions(selectedUser.id, {
+        allowCodes: userPerms.allow || [],
+        denyCodes: userPerms.deny || [],
+      });
+      if (!res?.success) throw new Error(res?.message || "Erreur update permissions utilisateur");
+      emitToast({ variant: "success", message: "Permissions utilisateur mises à jour" });
+      await fetchUserOverrides(selectedUser);
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur permissions utilisateur" });
     } finally {
       setSaving(false);
     }
@@ -689,6 +750,91 @@ export default function PeopleAdmin() {
                       {saving ? <Loader inline size="sm" label="Traitement..." /> : "Enregistrer"}
                     </button>
                   </div>
+                </div>
+                <div className="p-5 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Permissions individuelles</h2>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Héritées des rôles sauf override explicite (autoriser ou refuser).
+                    </p>
+                  </div>
+
+                  {!canPerms ? (
+                    <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                      Permission PERMISSIONS_MANAGE requise.
+                    </div>
+                  ) : userPermsLoading ? (
+                    <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                      Chargement des permissions...
+                    </div>
+                  ) : (permissions || []).length === 0 ? (
+                    <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                      Aucune permission disponible.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {(() => {
+                          const allowSet = new Set((userPerms.allow || []).map(normalizePermissionCode));
+                          const denySet = new Set((userPerms.deny || []).map(normalizePermissionCode));
+                          return (permissions || []).map((perm) => {
+                            const code = normalizePermissionCode(perm.code);
+                            if (!code) return null;
+                            const label = String(perm.label || perm.code || "").trim();
+                            const status = allowSet.has(code) ? "allow" : denySet.has(code) ? "deny" : "inherit";
+                            return (
+                              <div
+                                key={code}
+                                className="flex items-center justify-between gap-2 p-2 border border-gray-100 rounded-lg dark:border-gray-800"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs text-gray-800 dark:text-gray-200 truncate">{label}</div>
+                                  <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{code}</div>
+                                </div>
+                                <select
+                                  className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
+                                  value={status}
+                                  onChange={(e) => {
+                                    const next = e.target.value;
+                                    setUserPerms((prev) => {
+                                      const allow = new Set((prev.allow || []).map(normalizePermissionCode));
+                                      const deny = new Set((prev.deny || []).map(normalizePermissionCode));
+                                      if (next === "allow") {
+                                        allow.add(code);
+                                        deny.delete(code);
+                                      } else if (next === "deny") {
+                                        deny.add(code);
+                                        allow.delete(code);
+                                      } else {
+                                        allow.delete(code);
+                                        deny.delete(code);
+                                      }
+                                      return { allow: Array.from(allow), deny: Array.from(deny) };
+                                    });
+                                  }}
+                                  disabled={saving}
+                                >
+                                  <option value="inherit">Hériter</option>
+                                  <option value="allow">Autoriser</option>
+                                  <option value="deny">Refuser</option>
+                                </select>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-3">
+                        <button
+                          onClick={saveUserPermissions}
+                          disabled={saving}
+                          className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
+                        >
+                          {saving ? <Loader inline size="sm" label="Traitement..." /> : "Enregistrer"}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="p-5 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
                   <div>

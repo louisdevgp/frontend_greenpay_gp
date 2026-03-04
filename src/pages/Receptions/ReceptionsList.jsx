@@ -38,7 +38,7 @@ const initialState = {
 };
 
 export default function ReceptionsList({ mode = "all" }) {
-  const { user } = useAuth();
+  const { user, hasPermission, hasAnyPermission } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
   const delegatedRoles = (user?.agent?.delegations || [])
     .map((d) => String(d?.role_name || "").toUpperCase())
@@ -153,7 +153,9 @@ export default function ReceptionsList({ mode = "all" }) {
             const beneficiaire = String(row.beneficiaire || "").toLowerCase();
             if (!motif.includes(needle) && !beneficiaire.includes(needle)) return false;
           } else {
-            if (!String(row.reference_facture || "").toLowerCase().includes(needle)) return false;
+            const uuid = String(row.uuid || "").toLowerCase();
+            const receveur = String(row.receveur_nom || "").toLowerCase();
+            if (!uuid.includes(needle) && !receveur.includes(needle)) return false;
           }
         }
 
@@ -195,13 +197,15 @@ export default function ReceptionsList({ mode = "all" }) {
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
-  const canViewDetails =
-    effectiveRoles.has("ADMIN") ||
-    effectiveRoles.has("DAF") ||
-    effectiveRoles.has("DGA") ||
-    effectiveRoles.has("DG") ||
-    effectiveRoles.has("DIRECTEUR") ||
-    effectiveRoles.has("DEMANDEUR");
+  const canViewReceptionDetails = hasAnyPermission(["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL", "RECEPTION_LIST"]);
+  const canViewDemandeDetails = hasAnyPermission([
+    "DEMANDE_LIST",
+    "DEMANDE_LIST_SELF",
+    "VALIDATION_LIST_PENDING",
+    "VALIDATION_LIST_DONE",
+  ]);
+  const canCreateReception = hasPermission("RECEPTION_CREATE");
+  const canDownloadPdf = hasAnyPermission(["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL", "RECEPTION_LIST"]);
   const title =
     showDemandes ? "Demandes éligibles à réception"
       : modeKey === "pending" ? "Réceptions en attente"
@@ -212,7 +216,7 @@ export default function ReceptionsList({ mode = "all" }) {
       : modeKey === "pending" ? "Aucune réception en attente."
       : modeKey === "done" ? "Aucune réception effectuée."
         : "Aucune réception trouvée.";
-  const referenceLabel = showDemandes ? "Motif / Bénéficiaire" : "Réf. facture";
+  const referenceLabel = showDemandes ? "Recherche (motif / bénéficiaire)" : "Recherche (uuid / receveur)";
   const openCreate = (demande) => {
     setSelectedDemande(demande || null);
     setCreateOpen(true);
@@ -234,8 +238,6 @@ export default function ReceptionsList({ mode = "all" }) {
     { header: "Receveur", value: (r) => r.receveur_nom || "-" },
     { header: "Date réception", value: (r) => formatDateTime(r.date_reception) },
     { header: "Phase", value: (r) => formatPhase(r.phase) },
-    { header: "Réf. facture", value: (r) => r.reference_facture || "-" },
-    { header: "Montant", value: (r) => (r.montant != null ? `${formatMoney(r.montant)} FCFA` : "-") },
     { header: "Conforme", value: (r) => (r.conforme ? "Oui" : "Non") },
     { header: "Visa Directeur", value: (r) => (r.visa_directeur_id ? "Oui" : "Non") },
     { header: "Visa DAF", value: (r) => (r.visa_daf_id ? "Oui" : "Non") },
@@ -378,8 +380,8 @@ export default function ReceptionsList({ mode = "all" }) {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                  {paged.map((demande) => (
-                    <tr key={demande.id}>
+                {paged.map((demande) => (
+                  <tr key={demande.id}>
                       <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{demande.uuid}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>
                       <td className="px-4 py-3 text-sm">
@@ -392,23 +394,28 @@ export default function ReceptionsList({ mode = "all" }) {
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openCreate(demande)}
-                            title="Créer réception"
-                            aria-label="Créer réception"
-                            className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-600 text-white hover:opacity-90"
-                          >
-                            <FiFilePlus />
-                          </button>
-                          <Link
-                            to={`/demandes/${demande.uuid}`}
-                            title="Voir la demande"
-                            aria-label="Voir la demande"
-                            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                          >
-                            <FiEye />
-                          </Link>
+                          {canCreateReception ? (
+                            <button
+                              type="button"
+                              onClick={() => openCreate(demande)}
+                              title="Créer réception"
+                              aria-label="Créer réception"
+                              className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-600 text-white hover:opacity-90"
+                            >
+                              <FiFilePlus />
+                            </button>
+                          ) : null}
+                          {canViewDemandeDetails ? (
+                            <Link
+                              to={`/demandes/${demande.uuid}`}
+                              title="Voir la demande"
+                              aria-label="Voir la demande"
+                              className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                            >
+                              <FiEye />
+                            </Link>
+                          ) : null}
+                          {!canCreateReception && !canViewDemandeDetails ? "-" : null}
                         </div>
                       </td>
                     </tr>
@@ -423,8 +430,6 @@ export default function ReceptionsList({ mode = "all" }) {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Receveur</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Date réception</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Phase</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Réf. facture</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Conforme</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Visa Directeur</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Visa DAF</th>
@@ -432,14 +437,15 @@ export default function ReceptionsList({ mode = "all" }) {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                  {paged.map((reception) => (
+                  {paged.map((reception) => {
+                    const canDownloadRow = modeKey === "done" && reception.visa_daf_id && canDownloadPdf;
+                    const showActions = canDownloadRow || canViewReceptionDetails;
+                    return (
                     <tr key={reception.id}>
                       <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{reception.uuid}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{reception.receveur_nom}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(reception.date_reception)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatPhase(reception.phase)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{reception.reference_facture || "-"}</td>
-                      <td className="px-4 py-3 text-sm">{reception.montant ? `${formatMoney(reception.montant)} FCFA` : "-"}</td>
                       <td className="px-4 py-3 text-sm">
                         <span className={`px-2 py-1 text-xs rounded ${
                           reception.conforme
@@ -473,7 +479,7 @@ export default function ReceptionsList({ mode = "all" }) {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2">
-                          {modeKey === "done" && reception.visa_daf_id && canViewDetails ? (
+                          {canDownloadRow ? (
                             <LoadingButton
                               type="button"
                               onClick={() =>
@@ -489,7 +495,7 @@ export default function ReceptionsList({ mode = "all" }) {
                               {isDownloading(`reception-${reception.uuid}`) ? null : <FiDownload />}
                             </LoadingButton>
                           ) : null}
-                          {canViewDetails ? (
+                          {canViewReceptionDetails ? (
                             <Link
                               to={`/receptions/${reception.uuid}`}
                               title="Voir"
@@ -498,13 +504,13 @@ export default function ReceptionsList({ mode = "all" }) {
                             >
                               <FiEye />
                             </Link>
-                          ) : (
-                            "-"
-                          )}
+                          ) : null}
+                          {!showActions ? "-" : null}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             )}

@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { FiArrowLeft, FiDownload, FiEye, FiRefreshCw } from "react-icons/fi";
 import { getValidationByUuid } from "../../services/validations.service";
 import { listDocuments } from "../../services/documents.service";
-import ValidationActionModal from "./ValidationActionModal";
 import LoadingButton from "../../components/common/LoadingButton";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { downloadFile } from "../../utils/downloadFile";
@@ -32,8 +31,6 @@ export default function ValidationDetail() {
   const { uuid } = useParams(); // âœ… uuid
   const nav = useNavigate();
   const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [validation, setValidation] = useState(null);

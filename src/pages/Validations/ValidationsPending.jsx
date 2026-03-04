@@ -1,14 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { FiCheckCircle, FiCornerUpLeft, FiEye, FiRefreshCw, FiXCircle } from "react-icons/fi";
+import { FiRefreshCw } from "react-icons/fi";
 import { listValidationsPending } from "../../services/validations.service";
-import ValidationActionModal from "./ValidationActionModal";
 import Pagination from "../../components/common/Pagination";
 import Loader from "../../components/common/Loader";
 import ExportButton from "../../components/common/ExportButton";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../../utils/persistedFilters";
 import { labelValidationStepStatus } from "../../utils/statusLabels";
-import { useAuth } from "../../context/AuthContext";
 import { agentDisplayName } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
@@ -27,9 +25,6 @@ const initialState = {
 };
 
 export default function ValidationsPending() {
-  const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState([]);
@@ -39,8 +34,6 @@ export default function ValidationsPending() {
     const saved = loadPersistedState(STORAGE_KEY);
     return saved ? { ...initialState, ...saved } : initialState;
   });
-
-  const [modal, setModal] = useState({ open: false, mode: "approve", item: null });
 
   const fetch = async () => {
     setLoading(true);
@@ -98,22 +91,12 @@ export default function ValidationsPending() {
     savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
 
-  const openModal = (mode, item) => {
-    setModal({ open: true, mode, item });
-  };
-
-  const closeModal = () => {
-    setModal({ open: false, mode: "approve", item: null });
-    fetch(); // Refresh after action
-  };
-
   const total = filtered.length;
   const paged = useMemo(() => {
     const start = (state.page - 1) * state.pageSize;
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
-  const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
   const exportColumns = [
     { header: "UUID", value: (v) => v?.uuid || "-" },
     { header: "Rôle", value: (v) => v?.role_name || "-" },
@@ -147,14 +130,6 @@ export default function ValidationsPending() {
 
   return (
     <div className="space-y-4">
-      <ValidationActionModal
-        open={modal.open}
-        mode={modal.mode}
-        item={modal.item}
-        onClose={() => setModal({ open: false, mode: "approve", item: null })}
-        onDone={closeModal}
-      />
-
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Validations en attente</h1>
         <div className="flex items-center gap-2">
@@ -242,7 +217,6 @@ export default function ValidationsPending() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Demandeur</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
@@ -250,7 +224,15 @@ export default function ValidationsPending() {
                   const demande = pickDemande(validation);
                   return (
                     <tr key={validation.id}>
-                      <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{validation?.uuid || "-"}</td>
+                      <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">
+                        {validation?.uuid ? (
+                          <Link to={`/validations/${validation.uuid}`} className="text-blue-600 hover:underline dark:text-blue-400">
+                            {validation.uuid}
+                          </Link>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{validation?.role_name || "-"}</td>
                       <td className="px-4 py-3 text-sm">
                         {demande ? (
@@ -275,42 +257,6 @@ export default function ValidationsPending() {
                         {agentDisplayName(demande?.agents_demandes_paiement_demandeur_idToagents)}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(validation.created_at)}</td>
-                      <td className="px-4 py-3 text-sm space-x-2">
-                        <button
-                          onClick={() => openModal("approve", validation)}
-                          title="Valider"
-                          aria-label="Valider"
-                          className="inline-flex items-center justify-center p-2 rounded bg-green-600 text-white hover:opacity-90"
-                        >
-                          <FiCheckCircle />
-                        </button>
-                        <button
-                          onClick={() => openModal("reject", validation)}
-                          title="Rejeter"
-                          aria-label="Rejeter"
-                          className="inline-flex items-center justify-center p-2 rounded bg-red-600 text-white hover:opacity-90"
-                        >
-                          <FiXCircle />
-                        </button>
-                        <button
-                          onClick={() => openModal("return", validation)}
-                          title="Retourner"
-                          aria-label="Retourner"
-                          className="inline-flex items-center justify-center p-2 rounded bg-amber-600 text-white hover:opacity-90"
-                        >
-                          <FiCornerUpLeft />
-                        </button>
-                        {canViewDetails ? (
-                          <Link
-                            to={`/validations/${validation.uuid}`}
-                            title="Voir"
-                            aria-label="Voir"
-                            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                          >
-                            <FiEye />
-                          </Link>
-                        ) : null}
-                      </td>
                     </tr>
                   );
                 })}

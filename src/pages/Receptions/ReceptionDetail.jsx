@@ -11,6 +11,7 @@ import { useAuth } from "../../context/AuthContext";
 import { Modal } from "../../components/ui/modal";
 import { formatMoney } from "../../utils/formatUtils";
 import { emitToast } from "../../services/toastBus";
+import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 
 function formatDateTime(iso) {
   if (!iso) return "-";
@@ -31,18 +32,26 @@ function formatPhase(value) {
 export default function ReceptionDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission, hasAnyPermission } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
   const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
 
-  const canDownloadPdfRole = roles.includes("COMPTABLE") || roles.includes("DAF") || roles.includes("DIRECTEUR") || roles.includes("ADMIN");
+  const canListReceptions = hasAnyPermission(["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL", "RECEPTION_LIST"]);
+  const canViewDemandeDetails = hasAnyPermission([
+    "DEMANDE_LIST",
+    "DEMANDE_LIST_SELF",
+    "VALIDATION_LIST_PENDING",
+    "VALIDATION_LIST_DONE",
+  ]);
+  const canVisaDirecteurPerm = hasPermission("RECEPTION_VISA_DIRECTEUR");
+  const canVisaDafPerm = hasPermission("RECEPTION_VISA_DAF");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reception, setReception] = useState(null);
 
   const hasAllVisas = !!reception?.visa_directeur_id && !!reception?.visa_daf_id;
-  const canDownloadPdf = canDownloadPdfRole && hasAllVisas;
+  const canDownloadPdf = canListReceptions && hasAllVisas;
 
   const visaDirecteurAuto =
     !!reception?.visa_directeur_id &&
@@ -115,10 +124,22 @@ export default function ReceptionDetail() {
   useEffect(() => { if (reception?.id) fetchDocs(reception.id); }, [reception?.id]);
 
   const directorByDelegation = delegatedRoles.includes("DIRECTEUR");
+  const demandeDirectionId = reception?.demandes_paiement?.direction_id ?? reception?.demandes_paiement?.directionId;
+  const userDirectionId = user?.agent?.direction_id ?? user?.agent?.directionId;
+  const isDirectorForDemandeDirection =
+    roles.includes("DIRECTEUR") &&
+    demandeDirectionId != null &&
+    userDirectionId != null &&
+    Number(demandeDirectionId) === Number(userDirectionId);
   const canVisaDirecteur =
-    (roles.includes("DIRECTEUR") || directorByDelegation || roles.includes("ADMIN")) &&
+    canVisaDirecteurPerm &&
+    (roles.includes("ADMIN") || directorByDelegation || isDirectorForDemandeDirection) &&
     !reception?.visa_directeur_id;
-  const canVisaDaf = (roles.includes("DAF") || roles.includes("ADMIN")) && !!reception?.visa_directeur_id && !reception?.visa_daf_id;
+  const canVisaDaf =
+    canVisaDafPerm &&
+    (roles.includes("DAF") || roles.includes("ADMIN")) &&
+    !!reception?.visa_directeur_id &&
+    !reception?.visa_daf_id;
 
   const doVisa = async (kind, commentaire) => {
     if (!reception?.id) return;
@@ -207,6 +228,21 @@ export default function ReceptionDetail() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUploadFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const { accepted, rejected } = splitFilesBySize(files);
+    if (rejected.length) {
+      emitToast({
+        variant: "error",
+        title: "Fichier trop volumineux",
+        message: buildFileTooLargeMessage(rejected),
+        timeoutMs: 7000,
+      });
+    }
+    setUploadFiles(accepted);
+    if (!accepted.length) e.target.value = "";
   };
 
   return (
@@ -348,8 +384,6 @@ export default function ReceptionDetail() {
             <Info label="Phase" value={formatPhase(reception.phase)} />
             <Info label="Créé" value={formatDateTime(reception.created_at)} />
             <Info label="Conforme" value={reception.conforme ? "Oui" : "Non"} />
-            <Info label="Réf. facture" value={reception.reference_facture || "-"} />
-            <Info label="Montant" value={reception.montant != null ? `${formatMoney(reception.montant)} FCFA` : "-"} />
             <Info label="Visa Directeur" value={visaDirecteurValue} />
             <Info label="Visa DAF" value={visaDafValue} />
           </div>
@@ -411,7 +445,7 @@ export default function ReceptionDetail() {
               UUID: <span className="font-mono">{reception?.demandes_paiement?.uuid || "-"}</span>
             </div>
 
-            {reception?.demandes_paiement?.uuid ? (
+            {reception?.demandes_paiement?.uuid && canViewDemandeDetails ? (
               <div className="mt-3">
                 <Link
                   to={`/demandes/${reception.demandes_paiement.uuid}`}
@@ -482,7 +516,7 @@ export default function ReceptionDetail() {
                   <input
                     type="file"
                     multiple
-                    onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
+                    onChange={handleUploadFilesChange}
                     className="w-full text-sm"
                   />
                 </div>

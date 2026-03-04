@@ -8,6 +8,7 @@ import { emitToast } from "../../services/toastBus";
 import { adminResetUserPassword, createUser, listUsers, softDeleteUser, updateUser } from "../../services/users.admin.service";
 import { listRoles } from "../../services/roles.service";
 import { setUserRoles } from "../../services/userRoles.service";
+import { getUserPermissions, listPermissions, setUserPermissions } from "../../services/permissions.admin.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
 
 function uniq(arr) {
@@ -16,6 +17,10 @@ function uniq(arr) {
 
 function normalizeRoleName(role) {
   return String(role || "").trim().toUpperCase();
+}
+
+function normalizePermissionCode(code) {
+  return String(code || "").trim().toUpperCase();
 }
 
 function getPrimaryRole(user) {
@@ -44,6 +49,9 @@ export default function UsersAdmin({ embedded = false } = {}) {
 
   const [rows, setRows] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [permissions, setPermissions] = useState([]);
+  const [userPerms, setUserPerms] = useState({ allow: [], deny: [] });
+  const [userPermsLoading, setUserPermsLoading] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editUser, setEditUser] = useState(null);
@@ -61,16 +69,19 @@ export default function UsersAdmin({ embedded = false } = {}) {
     setLoading(true);
     setError("");
     try {
-      const [uRes, rRes] = await Promise.all([
+      const [uRes, rRes, pRes] = await Promise.all([
         listUsers({ q: q || undefined, is_active: isActive || undefined, limit: 50 }),
         listRoles(),
+        listPermissions(),
       ]);
 
       if (!uRes?.success) throw new Error(uRes?.message || "Erreur chargement users");
       if (!rRes?.success) throw new Error(rRes?.message || "Erreur chargement rôles");
+      if (!pRes?.success) throw new Error(pRes?.message || "Erreur chargement permissions");
 
       setRows(uRes?.data?.items || uRes?.items || []);
       setRoles(rRes.data || rRes.items || []);
+      setPermissions(pRes.data || pRes.items || []);
     } catch (e) {
       setError(e?.message || "Erreur");
     } finally {
@@ -87,7 +98,26 @@ export default function UsersAdmin({ embedded = false } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openEdit = (u) => {
+  const fetchUserOverrides = async (u) => {
+    const userId = u?.id;
+    if (!userId) return;
+    setUserPermsLoading(true);
+    try {
+      const res = await getUserPermissions(userId);
+      if (!res?.success) throw new Error(res?.message || "Erreur chargement permissions utilisateur");
+      setUserPerms({
+        allow: uniq((res?.data?.allowCodes || []).map(normalizePermissionCode)),
+        deny: uniq((res?.data?.denyCodes || []).map(normalizePermissionCode)),
+      });
+    } catch (e) {
+      setUserPerms({ allow: [], deny: [] });
+      emitToast({ variant: "error", message: e?.message || "Erreur permissions utilisateur" });
+    } finally {
+      setUserPermsLoading(false);
+    }
+  };
+
+  const openEdit = async (u) => {
     setEditUser(u);
     setForm({
       nom: u?.nom || "",
@@ -95,7 +125,9 @@ export default function UsersAdmin({ embedded = false } = {}) {
       is_active: !!u?.is_active,
       roles: getSecondaryRoles(u),
     });
+    setUserPerms({ allow: [], deny: [] });
     setEditOpen(true);
+    await fetchUserOverrides(u);
   };
 
   const roleNames = useMemo(() => {
@@ -138,6 +170,14 @@ export default function UsersAdmin({ embedded = false } = {}) {
         : uniq(form.roles);
       const rolesRes = await setUserRoles(idOrUuid, secondaryOnly);
       if (!rolesRes?.success) throw new Error(rolesRes?.message || "Erreur update rôles");
+
+      if (editUser?.id) {
+        const permRes = await setUserPermissions(editUser.id, {
+          allowCodes: userPerms.allow || [],
+          denyCodes: userPerms.deny || [],
+        });
+        if (!permRes?.success) throw new Error(permRes?.message || "Erreur update permissions utilisateur");
+      }
 
       emitToast({ variant: "success", message: "Utilisateur mis à jour" });
       setEditOpen(false);
@@ -573,6 +613,67 @@ export default function UsersAdmin({ embedded = false } = {}) {
                 );
               })}
             </div>
+          </div>
+
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Permissions individuelles</p>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">
+              Héritées des rôles sauf override explicite (autoriser ou refuser).
+            </p>
+            {userPermsLoading ? (
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Chargement des permissions...</div>
+            ) : (
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {(() => {
+                  const allowSet = new Set((userPerms.allow || []).map(normalizePermissionCode));
+                  const denySet = new Set((userPerms.deny || []).map(normalizePermissionCode));
+                  return (permissions || []).map((perm) => {
+                    const code = normalizePermissionCode(perm.code);
+                    if (!code) return null;
+                    const label = String(perm.label || perm.code || "").trim();
+                    const status = allowSet.has(code) ? "allow" : denySet.has(code) ? "deny" : "inherit";
+                    return (
+                    <div
+                      key={code}
+                      className="flex items-center justify-between gap-2 p-2 border border-gray-100 rounded-lg dark:border-gray-800"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs text-gray-800 dark:text-gray-200 truncate">{label}</div>
+                        <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{code}</div>
+                      </div>
+                      <select
+                        className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
+                        value={status}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setUserPerms((prev) => {
+                            const allow = new Set((prev.allow || []).map(normalizePermissionCode));
+                            const deny = new Set((prev.deny || []).map(normalizePermissionCode));
+                            if (next === "allow") {
+                              allow.add(code);
+                              deny.delete(code);
+                            } else if (next === "deny") {
+                              deny.add(code);
+                              allow.delete(code);
+                            } else {
+                              allow.delete(code);
+                              deny.delete(code);
+                            }
+                            return { allow: Array.from(allow), deny: Array.from(deny) };
+                          });
+                        }}
+                        disabled={saving}
+                      >
+                        <option value="inherit">Hériter</option>
+                        <option value="allow">Autoriser</option>
+                        <option value="deny">Refuser</option>
+                      </select>
+                    </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

@@ -193,6 +193,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                     <option value="Chèque">Chèque</option>
                     <option value="OM">OM</option>
                     <option value="Espèces">Espèces</option>
+                    <option value="Cartes de recharges">Cartes de recharges</option>
                   </select>
                 </div>
               </div>

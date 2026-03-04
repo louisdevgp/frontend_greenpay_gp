@@ -5,6 +5,7 @@ import { Modal } from "../../components/ui/modal";
 import DatePicker from "../../components/form/date-picker";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { emitToast } from "../../services/toastBus";
+import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 
 export default function CreateReceptionModal({ open, paiement, demande, onClose, onCreated }) {
     const [submitting, setSubmitting] = useState(false);
@@ -19,9 +20,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
         phase: "AVANT_PAIEMENT",
         date_reception: "",
         description: "",
-        conforme: true,
-        reference_facture: "",
-        montant: "",
+        conforme: false,
         observations: "",
         require_docs: true,
     });
@@ -35,16 +34,14 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
 
     useEffect(() => {
         if (!open) return;
-        const defaultPhase = canAfter ? "APRES_PAIEMENT" : "AVANT_PAIEMENT";
+        const defaultPhase = canAfter ?"APRES_PAIEMENT" : "AVANT_PAIEMENT";
         setSubmitting(false);
         setError("");
         setForm({
             phase: defaultPhase,
             date_reception: new Date().toISOString().slice(0, 10),
             description: "",
-            conforme: true,
-            reference_facture: "",
-            montant: "",
+            conforme: false,
             observations: "",
             require_docs: true,
         });
@@ -95,14 +92,12 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
             setSubmitting(true);
 
             const payload = {
-                ...(paiement?.id ? { paiement_id: paiement.id } : {}),
-                ...(demande?.id ? { demande_id: demande.id } : {}),
+                ...(paiement?.id ?{ paiement_id: paiement.id } : {}),
+                ...(demande?.id ?{ demande_id: demande.id } : {}),
                 phase: form.phase,
                 date_reception: new Date(form.date_reception).toISOString(),
                 conforme: !!form.conforme,
                 description: form.description.trim(),
-                reference_facture: form.reference_facture?.trim() || null,
-                montant: form.montant ? String(form.montant).trim() : null,
                 observations: form.observations?.trim() || null,
             };
 
@@ -113,7 +108,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
             if (form.require_docs && docs.files?.length && receptionId) {
                 const typeDocumentToSend =
                     String(docs.type_document).toLowerCase() === "autre"
-                        ? `autre:${docsTypeAutre.trim()}`
+                        ?`autre:${docsTypeAutre.trim()}`
                         : docs.type_document;
 
                 await uploadManyDocuments({
@@ -123,7 +118,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                 });
             }
 
-            emitToast({ variant: "success", message: "Reception creee" });
+            emitToast({ variant: "success", message: "Réception créée" });
             setSubmitting(false);
             onCreated?.();
             close();
@@ -135,6 +130,21 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
         } finally {
             setSubmitting(false);
         }
+    };
+
+    const handleDocsFilesChange = (e) => {
+        const files = Array.from(e.target.files || []);
+        const { accepted, rejected } = splitFilesBySize(files);
+        if (rejected.length) {
+            emitToast({
+                variant: "error",
+                title: "Fichier trop volumineux",
+                message: buildFileTooLargeMessage(rejected),
+                timeoutMs: 7000,
+            });
+        }
+        setDocs((p) => ({ ...p, files: accepted }));
+        if (!accepted.length) e.target.value = "";
     };
 
     if (!open) return null;
@@ -154,7 +164,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                     <div>
                         <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Nouvelle réception</h2>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {paiement?.uuid ? (
+                            {paiement?.uuid ?(
                                 <>Paiement: <span className="font-mono text-xs">{paiement.uuid}</span></>
                             ) : (
                                 <>Demande: <span className="font-mono text-xs">{demande?.uuid || "-"}</span></>
@@ -166,7 +176,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                     </button>
                 </div>
 
-                {error ? (
+                {error ?(
                     <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
                         {error}
                     </div>
@@ -183,7 +193,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                                 <option value="AVANT_PAIEMENT" disabled={canAfter}>Avant paiement</option>
                                 <option value="APRES_PAIEMENT" disabled={!canAfter}>Après paiement</option>
                             </select>
-                            {!canAfter ? (
+                            {!canAfter ?(
                                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">"Après paiement" disponible uniquement si un paiement existe.</p>
                             ) : null}
                         </Field>
@@ -209,7 +219,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                             </label>
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                 {form.conforme
-                                    ? "Si conforme, le visa Directeur est appliqué automatiquement et envoyé au DAF."
+                                    ?"Si conforme et si le demandeur est Directeur (ou délégué), le visa Directeur est appliqué automatiquement et envoyé au DAF."
                                     : "Si non conforme, le visa Directeur se fera manuellement après correction."}
                             </p>
                         </Field>
@@ -223,26 +233,6 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                             className={fieldClass}
                         />
                     </Field>
-
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <Field label="Référence facture (optionnel)">
-                            <input
-                                value={form.reference_facture}
-                                onChange={(e) => setField("reference_facture", e.target.value)}
-                                className={fieldClass}
-                                placeholder="Ex: FAC-2026-0001"
-                            />
-                        </Field>
-
-                        <Field label="Montant (optionnel)">
-                            <input
-                                value={form.montant}
-                                onChange={(e) => setField("montant", e.target.value)}
-                                className={fieldClass}
-                                placeholder="Ex: 200000"
-                            />
-                        </Field>
-                    </div>
 
                     <Field label="Observations (optionnel)">
                         <textarea
@@ -267,7 +257,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                         <div />
                     </div>
 
-                    {form.require_docs ? (
+                    {form.require_docs ?(
                         <div className="p-4 border border-gray-200 rounded-xl dark:border-gray-800">
                             <div className="text-sm font-medium text-gray-800 dark:text-white/90">Documents</div>
 
@@ -289,7 +279,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                                     </select>
                                 </Field>
 
-                                {String(docs.type_document).toLowerCase() === "autre" ? (
+                                {String(docs.type_document).toLowerCase() === "autre" ?(
                                     <Field label="Préciser (Autre)">
                                         <input
                                             value={docsTypeAutre}
@@ -304,10 +294,10 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                                     <input
                                         type="file"
                                         multiple
-                                        onChange={(e) => setDocs((p) => ({ ...p, files: Array.from(e.target.files || []) }))}
+                                        onChange={handleDocsFilesChange}
                                         className="w-full text-sm"
                                     />
-                                    {docs.files?.length ? (
+                                    {docs.files?.length ?(
                                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{docs.files.length} fichier(s)</p>
                                     ) : null}
                                 </Field>
@@ -329,7 +319,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                             disabled={submitting}
                             className="px-4 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
                         >
-                            {submitting ? "Traitement..." : "Enregistrer"}
+                            {submitting ?"Traitement..." : "Enregistrer"}
                         </button>
                     </div>
                 </form>

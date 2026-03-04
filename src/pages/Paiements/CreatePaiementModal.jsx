@@ -8,6 +8,7 @@ import { formatMoney } from "../../utils/formatUtils";
 import { uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
+import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -148,6 +149,21 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUploadFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const { accepted, rejected } = splitFilesBySize(files);
+    if (rejected.length) {
+      emitToast({
+        variant: "error",
+        title: "Fichier trop volumineux",
+        message: buildFileTooLargeMessage(rejected),
+        timeoutMs: 7000,
+      });
+    }
+    setUploadFiles(accepted);
+    if (!accepted.length) e.target.value = "";
   };
 
   // Calculer les montants en fonction de la demande sélectionnée
@@ -352,6 +368,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
               <option value="Chèque">Chèque</option>
               <option value="OM">OM</option>
               <option value="Espèces">Espèces</option>
+              <option value="Cartes de recharges">Cartes de recharges</option>
             </select>
           </div>
         </div>
@@ -395,7 +412,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
               <input
                 type="file"
                 multiple
-                onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
+                onChange={handleUploadFilesChange}
                 className="w-full text-sm"
                 disabled={loading}
               />

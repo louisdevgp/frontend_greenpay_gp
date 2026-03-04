@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { FiArrowLeft, FiDownload, FiEye, FiRefreshCw } from "react-icons/fi";
 import { getPaiement } from "../../services/paiements.service";
@@ -11,8 +11,7 @@ import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 export default function PaiementDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
-  const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const { hasPermission, hasAnyPermission } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -68,10 +67,13 @@ export default function PaiementDetail() {
     }
   }, [paiement?.id]);
 
-  const canDownloadPdf = useMemo(() => {
-    const allowedRoles = new Set(["ADMIN", "DAF", "DGA", "DG", "COMPTABLE"]);
-    return roles.some((r) => allowedRoles.has(String(r).toUpperCase()));
-  }, [roles]);
+  const canDownloadPdf = hasPermission("PAIEMENT_GET");
+  const canViewDemandeDetails = hasAnyPermission([
+    "DEMANDE_LIST",
+    "DEMANDE_LIST_SELF",
+    "VALIDATION_LIST_PENDING",
+    "VALIDATION_LIST_DONE",
+  ]);
 
   return (
     <div className="space-y-4">
@@ -148,7 +150,7 @@ export default function PaiementDetail() {
             <Info label="Demande" value={paiement.demandes_paiement?.uuid || "-"} />
           </div>
 
-          {paiement.demandes_paiement ? (
+          {paiement.demandes_paiement && canViewDemandeDetails ? (
             <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
               <div className="text-sm font-medium text-gray-800 dark:text-white/90">Demande liée</div>
               <div className="mt-2">

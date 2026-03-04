@@ -28,8 +28,7 @@ const initialState = {
 };
 
 export default function PaiementsList() {
-  const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const { hasPermission } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -110,7 +109,7 @@ export default function PaiementsList() {
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
-  const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
+  const canViewDetails = hasPermission("PAIEMENT_GET");
   const exportColumns = [
     { header: "UUID", key: "uuid" },
     { header: "Type", value: (p) => p?.type_paiement || "-" },

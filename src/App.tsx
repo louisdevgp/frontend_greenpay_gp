@@ -34,7 +34,7 @@ import RoleGuard from "./guards/RoleGuard.jsx";
 import PermissionGuard from "./guards/PermissionGuard.jsx";
 import ForcePasswordChangeGuard from "./guards/ForcePasswordChangeGuard.jsx";
 
-// modules métier
+// modules metier
 import PaiementsList from "./pages/Paiements/PaiementsList";
 import PaiementDetail from "./pages/Paiements/PaiementDetail";
 import PaiementsPending from "./pages/Paiements/PaiementsPending";
@@ -60,8 +60,8 @@ import PermissionsAdmin from "./pages/Admin/PermissionsAdmin";
 // (optionnel) page 403
 const Forbidden = () => (
   <div className="p-6">
-    <h1 className="text-xl font-semibold">403 - Accès refusé</h1>
-    <p className="text-sm text-gray-500 mt-2">Vous n’avez pas les droits pour accéder à cette page.</p>
+    <h1 className="text-xl font-semibold">403 - Acces refuse</h1>
+    <p className="text-sm text-gray-500 mt-2">Vous n'avez pas les droits pour acceder a cette page.</p>
   </div>
 );
 
@@ -86,7 +86,7 @@ export default function App() {
         <Route element={<AuthGuard />}>
           <Route element={<ForcePasswordChangeGuard />}>
             <Route element={<AppLayout />}>
-              {/* Home accessible à tous les connectés */}
+              {/* Home accessible a tous les connectes */}
               <Route index path="/" element={<Home />} />
 
               <Route path="/change-password" element={<ChangePassword />} />
@@ -96,42 +96,57 @@ export default function App() {
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/blank" element={<Blank />} />
 
-            {/* ---------------- MODULES METIER PROTEGES PAR ROLES ---------------- */}
+              {/* ---------------- MODULES METIER PROTEGES PAR PERMISSIONS ---------------- */}
 
-              {/* Paiements/Réceptions : COMPTABLE + DAF + CAISSE + DIRECTEUR + ADMIN */}
-              <Route element={<RoleGuard allow={["COMPTABLE", "DAF", "CAISSE", "DIRECTEUR", "ADMIN", "DEMANDEUR"]} />}>
+              {/* Paiements */}
+              <Route element={<PermissionGuard allow={["PAIEMENT_LIST"]} />}>
                 <Route path="/paiements" element={<PaiementsList />} />
                 <Route path="/paiements/done" element={<PaiementsList />} />
                 <Route path="/paiements/pending" element={<PaiementsPending />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["PAIEMENT_GET"]} />}>
                 <Route path="/paiements/:uuid" element={<PaiementDetail />} />
+              </Route>
+
+              {/* Receptions */}
+              <Route element={<PermissionGuard allow={["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL", "RECEPTION_LIST"]} />}>
                 <Route path="/receptions" element={<ReceptionsList mode="all" />} />
                 <Route path="/receptions/done" element={<ReceptionsList mode="done" />} />
                 <Route path="/receptions/pending" element={<ReceptionsList mode="pending" />} />
                 <Route path="/receptions/:uuid" element={<ReceptionDetail />} />
               </Route>
 
-              {/* Demandes (toutes) : DIRECTEUR + DG + DGA + DAF + ADMIN */}
-              <Route element={<RoleGuard allow={["RESPONSABLE","DEMANDEUR", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN", "COMPTABLE", "CAISSE", "ASSISTANTE_TECHNIQUE"]} />}>
+              {/* Demandes */}
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST"]} />}>
                 <Route path="/demandes/all" element={<DemandesAllList />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST_SELF"]} />}>
                 <Route path="/demandes/my" element={<DemandesMyList />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_SELF", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
                 <Route path="/demandes/:uuid" element={<DemandeDetail />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["DEMANDE_CREATE"]} />}>
                 <Route path="/demandes/create" element={<CreateDemande />} />
               </Route>
 
-              {/* Validations : RESPONSABLE + DIRECTEUR + DG + DGA + DAF + ADMIN */}
-              <Route element={<RoleGuard allow={["RESPONSABLE", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
+              {/* Validations */}
+              <Route element={<PermissionGuard allow={["VALIDATION_LIST_PENDING"]} />}>
                 <Route path="/validations/pending" element={<ValidationsPending />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["VALIDATION_LIST_DONE"]} />}>
                 <Route path="/validations/done" element={<ValidationsDone />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["VALIDATION_GET"]} />}>
                 <Route path="/validations/:uuid" element={<ValidationDetail />} />
                 <Route path="/validations/uuid/:uuid" element={<ValidationDetail />} />
               </Route>
 
-              {/* Délégations (non-admin autorisé, mais contrôlé côté API) */}
-              <Route element={<RoleGuard allow={["RESPONSABLE", "DIRECTEUR", "DG", "DGA", "DAF", "ADMIN"]} />}>
+              {/* Delegations (non-admin autorise, mais controle cote API) */}
+              <Route element={<PermissionGuard allow={["VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
                 <Route path="/delegations" element={<DelegationsAdmin />} />
               </Route>
-
-              {/* Admin : piloté par permissions (DB) */}
+              {/* Admin : pilote par permissions (DB) */}
               <Route element={<PermissionGuard allow={["USERS_MANAGE", "AGENTS_MANAGE"]} />}>
                 <Route path="/admin/people" element={<PeopleAdmin />} />
                 <Route path="/admin/users" element={<PeopleAdmin />} />
@@ -143,7 +158,7 @@ export default function App() {
                 <Route path="/admin/permissions" element={<PermissionsAdmin />} />
               </Route>
 
-              {/* anciennes pages dédiées supprimées au profit de la vue unique */}
+              {/* anciennes pages dediees supprimees au profit de la vue unique */}
 
               <Route element={<PermissionGuard allow={["DIRECTIONS_MANAGE"]} />}>
                 <Route path="/admin/directions" element={<DirectionsAdmin />} />
@@ -186,3 +201,4 @@ export default function App() {
     </Router>
   );
 }
+

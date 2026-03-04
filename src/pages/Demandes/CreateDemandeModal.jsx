@@ -6,6 +6,11 @@ import { formatMoney } from "../../utils/formatUtils";
 import { useDropzone } from "react-dropzone";
 import { uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
+import {
+  MAX_UPLOAD_SIZE_BYTES,
+  buildFileTooLargeMessage,
+  extractOversizedDropzoneFiles,
+} from "../../utils/uploadLimits";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -152,7 +157,16 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
     );
   };
 
-  const onDrop = (acceptedFiles) => {
+  const onDrop = (acceptedFiles, fileRejections) => {
+    const oversized = extractOversizedDropzoneFiles(fileRejections);
+    if (oversized.length) {
+      emitToast({
+        variant: "error",
+        title: "Fichier trop volumineux",
+        message: buildFileTooLargeMessage(oversized),
+        timeoutMs: 7000,
+      });
+    }
     if (!acceptedFiles?.length) return;
     setUploadFiles((prev) => [...prev, ...acceptedFiles]);
   };
@@ -160,6 +174,7 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     multiple: true,
+    maxSize: MAX_UPLOAD_SIZE_BYTES,
     accept: {
       "application/pdf": [],
       "image/png": [],

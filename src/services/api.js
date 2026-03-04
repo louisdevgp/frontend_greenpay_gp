@@ -14,6 +14,18 @@ export const api = axios.create({
   timeout: 30_000,
 });
 
+let cachedToken = null;
+
+export function setApiToken(token) {
+  cachedToken = token || null;
+  if (cachedToken) {
+    api.defaults.headers.common.Authorization = `Bearer ${cachedToken}`;
+  } else {
+    delete api.defaults.headers.common.Authorization;
+  }
+}
+
+
 function isBlobResponse(response) {
   const rt = response?.config?.responseType;
   if (rt && rt !== "json") return true;
@@ -63,11 +75,12 @@ function normalizeResponsePayload(payload) {
 }
 
 let last401ToastAt = 0;
+let last403ToastAt = 0;
 
 // Ajoute automatiquement le token à chaque requête
 api.interceptors.request.use((config) => {
   const auth = readStorage(STORAGE_KEYS.AUTH, null);
-  const token = auth?.accessToken;
+  const token = cachedToken || auth?.accessToken || auth?.token || auth?.access_token;
 
   if (token) {
     config.headers = config.headers || {};
@@ -101,11 +114,16 @@ api.interceptors.response.use(
         });
       }
     } else if (status === 403) {
-      emitToast({
-        variant: "error",
-        title: "Accès refusé",
-        message,
-      });
+      const now = Date.now();
+      if (now - last403ToastAt > 5000) {
+        last403ToastAt = now;
+        emitToast({
+          variant: "error",
+          title: "Accès refusé",
+          message,
+          timeoutMs: 4500,
+        });
+      }
     } else if (status >= 400) {
       emitToast({
         variant: "error",

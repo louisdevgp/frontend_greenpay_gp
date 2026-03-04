@@ -3,9 +3,10 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { getDemande, deleteDemande, closeDemande, getDemandeValidationHistory } from "../../services/demandes.services";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
-import { FiArrowLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
+import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
 import CreateReceptionModal from "../Receptions/CreateReceptionModal";
+import ValidationActionModal from "../Validations/ValidationActionModal";
 import ConfirmActionModal from "../../components/common/ConfirmActionModal";
 import LoadingButton from "../../components/common/LoadingButton";
 import { emitToast } from "../../services/toastBus";
@@ -14,6 +15,7 @@ import { labelDemandeStatut, labelValidationStepStatus, demandeStatusBadgeClass 
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { agentDisplayName, validationActorLabel } from "../../utils/validationActors";
 import Loader from "../../components/common/Loader";
+import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 
 const DAF_CRITERE4_LABEL = "Moyen de paiement";
 
@@ -41,8 +43,14 @@ function formatDafCritere4(value, fallbackLabel) {
 export default function DemandeDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission, hasAnyPermission } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
+  const canUpdateDemande = hasPermission("DEMANDE_UPDATE");
+  const canDeleteDemande = hasPermission("DEMANDE_DELETE");
+  const canCloseDemande = hasPermission("DEMANDE_CLOSE");
+  const canCreateReceptionPerm = hasPermission("RECEPTION_CREATE");
+  const canViewPaiementDetails = hasPermission("PAIEMENT_GET");
+  const canDownloadPdf = hasAnyPermission(["DEMANDE_PDF", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -59,6 +67,7 @@ export default function DemandeDetail() {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState({ open: false, kind: null });
+  const [validationAction, setValidationAction] = useState({ open: false, mode: "approve" });
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -127,7 +136,7 @@ export default function DemandeDetail() {
     if (!demandeId) return;
     setPaiementsLoading(true);
     try {
-      const res = await fetch(`/api/paiements?demande_id=${demandeId}`, {
+      const res = await fetch(`/api/paiements/by-demande/${demandeId}`, {
         headers: { Authorization: `Bearer ${user.token}` },
       });
       const data = await res.json();
@@ -158,12 +167,6 @@ export default function DemandeDetail() {
     return Number(demande.demandeur_id) === Number(agentId);
   }, [demande, agentId]);
 
-  const canEdit = useMemo(() => {
-    if (!demande || !user) return false;
-    const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
-    return isAModifier && (isOwner || isAdmin);
-  }, [demande, user, isOwner, isAdmin]);
-
   const statutLower = useMemo(() => String(demande?.statut || "").toLowerCase(), [demande?.statut]);
   const isClosed = useMemo(() => ["cloture", "cloturee"].includes(statutLower), [statutLower]);
   const isRejected = useMemo(() => ["rejete", "rejetee"].includes(statutLower), [statutLower]);
@@ -186,6 +189,57 @@ export default function DemandeDetail() {
     return steps.every((step) => String(step?.status || "").toLowerCase() === "valide");
   }, [demande?.validation_steps]);
 
+  const pendingValidationStep = useMemo(() => {
+    const steps = (demande?.validation_steps || []).filter(
+      (s) => String(s?.status || "").toLowerCase() === "en_attente"
+    );
+    if (!steps.length) return null;
+    const sorted = [...steps].sort((a, b) => (Number(a?.level) || 0) - (Number(b?.level) || 0));
+    return sorted[0] || null;
+  }, [demande?.validation_steps]);
+
+  const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
+  const pendingRole = String(pendingValidationStep?.role_name || "").toUpperCase();
+  const canActByAssignment =
+    pendingValidationStep?.validator_id != null &&
+    agentId != null &&
+    Number(pendingValidationStep.validator_id) === Number(agentId);
+  const canActByDelegation = pendingRole && delegatedRoles.includes(pendingRole);
+  const canActOnPendingStep = !!pendingValidationStep && (canActByAssignment || canActByDelegation);
+  const canApprovePending = canActOnPendingStep && hasPermission("VALIDATION_APPROVE");
+  const canRejectPending = canActOnPendingStep && hasPermission("VALIDATION_REJECT");
+  const canReturnPending = canActOnPendingStep && hasPermission("VALIDATION_RETURN_FOR_MODIFICATION");
+  const showValidationActions = canApprovePending || canRejectPending || canReturnPending;
+  const isDirectorPending = pendingRole === "DIRECTEUR";
+  const isDirectorSameDirection =
+    roles.includes("DIRECTEUR") &&
+    demande?.direction_id != null &&
+    user?.agent?.direction_id != null &&
+    Number(demande.direction_id) === Number(user.agent.direction_id);
+  const canEditAsDirector =
+    canUpdateDemande &&
+    isDirectorPending &&
+    (canActByAssignment || canActByDelegation || isDirectorSameDirection);
+  const canEdit = useMemo(() => {
+    if (!demande || !user) return false;
+    if (!canUpdateDemande) return false;
+    const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
+    if (isAModifier && (isOwner || isAdmin)) return true;
+    return canEditAsDirector;
+  }, [demande, user, isOwner, isAdmin, canUpdateDemande, canEditAsDirector]);
+  const validationActionItem = useMemo(() => {
+    if (!pendingValidationStep || !demande) return null;
+    return { ...pendingValidationStep, demandes_paiement: demande };
+  }, [pendingValidationStep, demande]);
+
+  const openValidationAction = (mode) => {
+    setValidationAction({ open: true, mode });
+  };
+
+  const closeValidationAction = () => {
+    setValidationAction({ open: false, mode: "approve" });
+  };
+
   const receptions = demande?.receptions || [];
   const hasReceptionBefore = useMemo(
     () => receptions.some((r) => String(r?.phase || "").toUpperCase() === "AVANT_PAIEMENT"),
@@ -197,23 +251,20 @@ export default function DemandeDetail() {
   );
   const hasReception = receptions.length > 0;
 
-  const canCancel = (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
+  const canCancel = canDeleteDemande && (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
   const canClose =
+    canCloseDemande &&
     (isOwner || isAdmin) &&
     !isClosed &&
     (hasReception || ["receptionnee", "paye", "payee"].includes(statutLower));
   const canCreateReception =
+    canCreateReceptionPerm &&
     isOwner &&
     allValidationsApproved &&
     statutEligibleForReception &&
     !isClosed &&
     !isRejected &&
     !(hasReceptionBefore && hasReceptionAfter);
-
-  const canDownloadPdf = useMemo(() => {
-    const allowedRoles = new Set(["ADMIN", "DAF", "DGA", "DG", "COMPTABLE", "DEMANDEUR"]);
-    return roles.some((r) => allowedRoles.has(String(r).toUpperCase()));
-  }, [roles]);
 
   const doUpload = async () => {
     if (!demande?.id) return;
@@ -258,6 +309,21 @@ export default function DemandeDetail() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleUploadFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const { accepted, rejected } = splitFilesBySize(files);
+    if (rejected.length) {
+      emitToast({
+        variant: "error",
+        title: "Fichier trop volumineux",
+        message: buildFileTooLargeMessage(rejected),
+        timeoutMs: 7000,
+      });
+    }
+    setUploadFiles(accepted);
+    if (!accepted.length) e.target.value = "";
   };
 
   const handleCancelDemande = async () => {
@@ -501,6 +567,16 @@ export default function DemandeDetail() {
 
   return (
     <div className="space-y-4">
+      <ValidationActionModal
+        open={validationAction.open}
+        mode={validationAction.mode}
+        item={validationActionItem}
+        onClose={closeValidationAction}
+        onDone={async () => {
+          closeValidationAction();
+          await fetchDemande();
+        }}
+      />
       {loading ? (
         <div className="p-4 text-center">Chargement...</div>
       ) : error ? (
@@ -902,12 +978,16 @@ export default function DemandeDetail() {
                         <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{formatMoney(p.montant)} FCFA</td>
                         <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(p.created_at)}</td>
                         <td className="px-4 py-3 text-sm">
-                          <Link 
-                            to={`/paiements/${p.uuid}`}
-                            className="text-blue-600 hover:underline dark:text-blue-400"
-                          >
-                            Voir
-                          </Link>
+                          {canViewPaiementDetails ? (
+                            <Link 
+                              to={`/paiements/${p.uuid}`}
+                              className="text-blue-600 hover:underline dark:text-blue-400"
+                            >
+                              Voir
+                            </Link>
+                          ) : (
+                            "-"
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1030,7 +1110,7 @@ export default function DemandeDetail() {
                   <input
                     type="file"
                     multiple
-                    onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
+                    onChange={handleUploadFilesChange}
                     className="w-full text-sm"
                   />
                 </div>
@@ -1079,6 +1159,52 @@ export default function DemandeDetail() {
               </div>
             )}
           </div>
+
+          {showValidationActions ? (
+            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Actions de validation</div>
+              {pendingValidationStep ? (
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Étape en attente: {pendingValidationStep.role_name || "-"} (niveau {pendingValidationStep.level ?? "-"})
+                </div>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {canApprovePending ? (
+                  <button
+                    type="button"
+                    onClick={() => openValidationAction("approve")}
+                    title="Valider"
+                    aria-label="Valider"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                  >
+                    <FiCheckCircle /> Valider
+                  </button>
+                ) : null}
+                {canRejectPending ? (
+                  <button
+                    type="button"
+                    onClick={() => openValidationAction("reject")}
+                    title="Rejeter"
+                    aria-label="Rejeter"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-red-600 text-white hover:opacity-90"
+                  >
+                    <FiXCircle /> Rejeter
+                  </button>
+                ) : null}
+                {canReturnPending ? (
+                  <button
+                    type="button"
+                    onClick={() => openValidationAction("return")}
+                    title="Retourner"
+                    aria-label="Retourner"
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-amber-600 text-white hover:opacity-90"
+                  >
+                    <FiCornerUpLeft /> Retourner
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -1093,4 +1219,3 @@ function Info({ label, value }) {
     </div>
   );
 }
-

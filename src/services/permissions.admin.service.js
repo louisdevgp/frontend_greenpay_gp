@@ -14,3 +14,13 @@ export async function setRolePermissions(roleId, permissionCodes = []) {
   const res = await api.put(`/permissions/roles/${roleId}`, { permissionCodes });
   return res.data;
 }
+
+export async function getUserPermissions(userId) {
+  const res = await api.get(`/permissions/users/${userId}`);
+  return res.data;
+}
+
+export async function setUserPermissions(userId, { allowCodes = [], denyCodes = [] } = {}) {
+  const res = await api.put(`/permissions/users/${userId}`, { allowCodes, denyCodes });
+  return res.data;
+}

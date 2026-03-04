@@ -99,7 +99,7 @@ const MENU_ITEMS: MenuItem[] = [
     icon: <TableIcon />,
     name: "Réceptions",
     subItems: [
-      { name: "Réceptions", path: "/receptions", icon: <FileIcon />, permissions: ["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL"] },
+      { name: "Réceptions", path: "/receptions", icon: <FileIcon />, permissions: ["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL", "RECEPTION_LIST"] },
       { name: "En attente", path: "/receptions/pending", icon: <TimeIcon />, permissions: ["RECEPTION_VISA_DIRECTEUR", "RECEPTION_VISA_DAF"] },
       { name: "Effectuées", path: "/receptions/done", icon: <CheckCircleIcon />, permissions: ["RECEPTION_VISA_DIRECTEUR", "RECEPTION_VISA_DAF"] },
     ],

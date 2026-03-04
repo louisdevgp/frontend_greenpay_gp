@@ -51,10 +51,8 @@ const initialState = {
 };
 
 export default function ValidationsDone() {
-  const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-  const permissions = (user?.permissions || []).map((p) => String(p).toUpperCase());
-  const canCancel = permissions.includes("VALIDATION_CANCEL");
+  const { hasPermission } = useAuth();
+  const canCancel = hasPermission("VALIDATION_CANCEL");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -143,7 +141,7 @@ export default function ValidationsDone() {
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
-  const canViewDetails = roles.includes("ADMIN") || roles.includes("DAF") || roles.includes("DGA") || roles.includes("DG");
+  const canViewDetails = hasPermission("VALIDATION_GET");
   const exportColumns = [
     { header: "UUID", value: (v) => v?.uuid || "-" },
     { header: "Rôle", value: (v) => v?.role_name || "-" },
@@ -330,6 +328,15 @@ export default function ValidationsDone() {
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
                 {paged.map((validation, index) => {
                   const demande = pickDemande(validation);
+                  const demandeStatusKey = String(demande?.statut || "").toLowerCase();
+                  const isPaidDemande = [
+                    "paye",
+                    "payee",
+                    "en_attente_paiement",
+                    "receptionnee",
+                    "cloture",
+                    "cloturee",
+                  ].includes(demandeStatusKey);
                   const statusKey = String(validation?.status || "").toLowerCase();
                   const statusClass =
                     statusKey === "valide"
@@ -342,6 +349,7 @@ export default function ValidationsDone() {
                             ? "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
                   const canCancelRow =
+                    !isPaidDemande &&
                     canCancel &&
                     (validation?.can_cancel === true ||
                       (validation?.can_cancel == null && statusKey === "valide"));

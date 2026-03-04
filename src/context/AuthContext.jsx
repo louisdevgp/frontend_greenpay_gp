@@ -1,6 +1,7 @@
 // src/context/AuthContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clearAuth, getAuth, login as apiLogin, me as apiMe, setAuth } from "../services/auth.service";
+import { setApiToken } from "../services/api";
 
 /**
  * @typedef {{
@@ -47,10 +48,13 @@ export function AuthProvider({ children }) {
       try {
         const persisted = getAuth();
         if (!persisted?.accessToken) {
+
+          setApiToken(null);
           setLoading(false);
           return;
         }
 
+        setApiToken(persisted.accessToken);
         // Vérifie le token et récupère user propre via /me
         try {
           const res = await apiMe(); // { success, data }
@@ -59,9 +63,13 @@ export function AuthProvider({ children }) {
             const next = { ...persisted, user: updatedUser };
             setAuth(next);
             setAuthState(next);
+
+            setApiToken(next.accessToken);
           } else {
             clearAuth();
             setAuthState(null);
+
+            setApiToken(null);
           }
         } catch (e) {
           // If backend requires password change, keep auth in storage
@@ -69,6 +77,8 @@ export function AuthProvider({ children }) {
             const next = { ...persisted, mustChangePassword: true };
             setAuth(next);
             setAuthState(next);
+
+            setApiToken(next.accessToken);
           } else {
             throw e;
           }
@@ -77,6 +87,8 @@ export function AuthProvider({ children }) {
         // token invalide / expiré / réseau
         clearAuth();
         setAuthState(null);
+
+        setApiToken(null);
       } finally {
         setLoading(false);
       }
@@ -108,6 +120,8 @@ export function AuthProvider({ children }) {
     setAuth(next);
     setAuthState(next);
 
+    setApiToken(next.accessToken);
+
     // refresh user from /users/me (adds delegatedRoles + permissions)
     try {
       const meRes = await apiMe();
@@ -115,6 +129,8 @@ export function AuthProvider({ children }) {
         const refreshed = { ...next, user: meRes.data };
         setAuth(refreshed);
         setAuthState(refreshed);
+
+        setApiToken(refreshed.accessToken);
         return refreshed;
       }
     } catch {
@@ -127,6 +143,8 @@ export function AuthProvider({ children }) {
   const logout = () => {
     clearAuth();
     setAuthState(null);
+
+    setApiToken(null);
   };
 
   const refreshMe = async () => {
@@ -137,6 +155,8 @@ export function AuthProvider({ children }) {
     const next = { ...current, user: res.data };
     setAuth(next);
     setAuthState(next);
+
+    setApiToken(next.accessToken);
     return next.user;
   };
 
