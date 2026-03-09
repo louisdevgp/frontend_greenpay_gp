@@ -15,7 +15,6 @@ import {
   PlusIcon,
   CheckCircleIcon,
   TimeIcon,
-  LockIcon,
   FolderIcon,
   BoxIconLine,
   PlugInIcon,
@@ -26,6 +25,7 @@ import { useSidebar } from "../context/sidebar";
 import SidebarWidget from "./SidebarWidget";
 import { useAuth } from "../context/AuthContext.jsx";
 import { listPermissions } from "../services/permissions.admin.service";
+import { useRealtime } from "../context/RealtimeContext.tsx";
 
 type PermissionSpec = {
   permission?: string;
@@ -60,7 +60,6 @@ const ADMIN_SUBITEMS: SubItem[] = [
     icon: <UserIcon />,
     permissions: ["USERS_MANAGE", "AGENTS_MANAGE"],
   },
-  { name: "Permissions", path: "/admin/permissions", icon: <LockIcon />, permission: "PERMISSIONS_MANAGE" },
   { name: "Directions", path: "/admin/directions", icon: <FolderIcon />, permission: "DIRECTIONS_MANAGE" },
   { name: "Départements", path: "/admin/departements", icon: <BoxIconLine />, permission: "DEPARTEMENTS_MANAGE" },
   { name: "Services", path: "/admin/services", icon: <PlugInIcon />, permission: "SERVICES_MANAGE" },
@@ -80,7 +79,7 @@ const MENU_ITEMS: MenuItem[] = [
     name: "Demandes",
     subItems: [
       { name: "Mes demandes", path: "/demandes/my", icon: <FileIcon />, permission: "DEMANDE_LIST_SELF" },
-      { name: "Toutes les demandes", path: "/demandes/all", icon: <FileIcon />, permission: "DEMANDE_LIST" },
+      { name: "Toutes les demandes", path: "/demandes/all", icon: <FileIcon />, permissions: ["DEMANDE_LIST", "DEMANDE_LIST_ALL"] },
       { name: "Nouvelle demande", path: "/demandes/create", icon: <PlusIcon />, permission: "DEMANDE_CREATE", new: true },
     ],
   },
@@ -91,7 +90,7 @@ const MENU_ITEMS: MenuItem[] = [
     subItems: [
       { name: "En attente", path: "/validations/pending", icon: <TimeIcon />, permission: "VALIDATION_LIST_PENDING" },
       { name: "Historique", path: "/validations/done", icon: <CheckCircleIcon />, permission: "VALIDATION_LIST_DONE" },
-      { name: "Délégations", path: "/delegations", icon: <GroupIcon />, permissions: ["VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"] },
+      { name: "Délégations", path: "/delegations", icon: <GroupIcon />, permission: "DELEGATIONS_MANAGE" },
     ],
   },
   {
@@ -135,6 +134,7 @@ export default function AppSidebar() {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const location = useLocation();
   const { user } = useAuth() as { user?: AuthUser };
+  const { pendingValidationsCount, pendingPaiementsCount, pendingReceptionsCount } = useRealtime();
 
   const [permissionDefs, setPermissionDefs] = useState([]);
 
@@ -277,6 +277,12 @@ export default function AppSidebar() {
       {items.map((nav, index) => {
         const key = `${type}-${index}`;
         const isOpen = !!openSubmenus[key];
+        let pendingCount = 0;
+        if (nav.name === "Validations") pendingCount = pendingValidationsCount;
+        if (nav.name === "Paiements") pendingCount = pendingPaiementsCount;
+        if (nav.name === "Réceptions") pendingCount = pendingReceptionsCount;
+        const hasPending = pendingCount > 0;
+        const pendingBadgeLabel = pendingCount > 99 ? "99+" : String(pendingCount);
 
         return (
           <li key={key}>
@@ -293,13 +299,23 @@ export default function AppSidebar() {
                 <span
                   className={`menu-item-icon-size ${
                     isOpen ? "menu-item-icon-active" : "menu-item-icon-inactive"
-                  }`}
+                  } relative`}
                 >
                   {nav.icon}
+                  {hasPending ? (
+                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-orange-500"></span>
+                  ) : null}
                 </span>
 
                 {(isExpanded || isHovered || isMobileOpen) && (
-                  <span className="menu-item-text">{nav.name}</span>
+                  <span className="menu-item-text">
+                    {nav.name}
+                    {hasPending ? (
+                      <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                        {pendingBadgeLabel}
+                      </span>
+                    ) : null}
+                  </span>
                 )}
 
                 {(isExpanded || isHovered || isMobileOpen) && (
@@ -348,6 +364,19 @@ export default function AppSidebar() {
                       >
                         <span className="[&_svg]:size-4">{sub.icon}</span>
                         <span>{sub.name}</span>
+                        {sub.path === "/validations/pending" && pendingValidationsCount > 0 ? (
+                          <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                            {pendingBadgeLabel}
+                          </span>
+                        ) : sub.path === "/paiements/pending" && pendingPaiementsCount > 0 ? (
+                          <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                            {pendingBadgeLabel}
+                          </span>
+                        ) : sub.path === "/receptions/pending" && pendingReceptionsCount > 0 ? (
+                          <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                            {pendingBadgeLabel}
+                          </span>
+                        ) : null}
                       </Link>
                     </li>
                   ))}

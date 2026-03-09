@@ -11,6 +11,7 @@ import DatePicker from "../../components/form/date-picker";
 import { useAuth } from "../../context/AuthContext";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
+import { useRealtime } from "../../context/RealtimeContext.tsx";
 
 const STORAGE_KEY = "filters:paiements:list";
 
@@ -29,6 +30,7 @@ const initialState = {
 
 export default function PaiementsList() {
   const { hasPermission } = useAuth();
+  const { paiementsTick } = useRealtime();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -68,6 +70,10 @@ export default function PaiementsList() {
   useEffect(() => {
     fetch();
   }, [state.page, state.pageSize, state.filters]);
+
+  useEffect(() => {
+    if (paiementsTick > 0) fetch();
+  }, [paiementsTick]);
 
   useEffect(() => {
     if (state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {

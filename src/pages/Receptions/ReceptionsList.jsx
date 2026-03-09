@@ -16,6 +16,7 @@ import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusL
 import CreateReceptionModal from "./CreateReceptionModal";
 import { downloadFile } from "../../utils/downloadFile";
 import { exportRowsToExcel } from "../../utils/excelExport";
+import { useRealtime } from "../../context/RealtimeContext.tsx";
 
 function formatDate(input) {
   if (!input) return "";
@@ -39,6 +40,7 @@ const initialState = {
 
 export default function ReceptionsList({ mode = "all" }) {
   const { user, hasPermission, hasAnyPermission } = useAuth();
+  const { receptionsTick } = useRealtime();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
   const delegatedRoles = (user?.agent?.delegations || [])
     .map((d) => String(d?.role_name || "").toUpperCase())
@@ -142,6 +144,10 @@ export default function ReceptionsList({ mode = "all" }) {
   useEffect(() => {
     fetch();
   }, [state.page, state.pageSize, state.filters, modeKey, showDemandes]);
+
+  useEffect(() => {
+    if (receptionsTick > 0) fetch();
+  }, [receptionsTick]);
 
   useEffect(() => {
     if (state.filters.reference || state.filters.dateStart || state.filters.dateEnd) {

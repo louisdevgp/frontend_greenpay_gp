@@ -26,6 +26,14 @@ import {
 import { listDirections } from "../../services/directions.service";
 import { listDepartements } from "../../services/departements.service";
 import { listServices } from "../../services/services.service";
+import {
+  normalizePermissionCode,
+  normalizeScopeType,
+  normalizeScopeId,
+  normalizeScope,
+  scopeKey,
+  scopeTypeLabel,
+} from "../../utils/permissionScopes";
 
 function uniq(arr) {
   return Array.from(new Set((arr || []).filter(Boolean)));
@@ -33,10 +41,6 @@ function uniq(arr) {
 
 function normalizeRoleName(role) {
   return String(role || "").trim().toUpperCase();
-}
-
-function normalizePermissionCode(code) {
-  return String(code || "").trim().toUpperCase();
 }
 
 function getPrimaryRole(user) {
@@ -55,11 +59,186 @@ function getSecondaryRoles(user) {
   return uniq(filtered);
 }
 
+function normalizeScopeList(list = []) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(list) ? list : []) {
+    const scope = normalizeScope(raw);
+    const key = scopeKey(scope);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(scope);
+  }
+  return out;
+}
+
+function buildScopeLabel(scope, { directionsById, departementsById, servicesById }) {
+  const type = normalizeScopeType(scope?.type);
+  const id = normalizeScopeId(scope?.id);
+  if (!type || type === "GLOBAL") return "Global";
+  if (type === "DIRECTION") {
+    const dir = directionsById.get(String(id));
+    return dir ? `Direction: ${dir.nom}` : `Direction #${id ?? "-"}`;
+  }
+  if (type === "DEPARTEMENT") {
+    const dep = departementsById.get(String(id));
+    return dep ? `Departement: ${dep.nom}` : `Departement #${id ?? "-"}`;
+  }
+  if (type === "SERVICE") {
+    const srv = servicesById.get(String(id));
+    return srv ? `Service: ${srv.nom}` : `Service #${id ?? "-"}`;
+  }
+  return scopeTypeLabel(type);
+}
+
+function PermissionScopeEditor({
+  scopes,
+  onChange,
+  directions = [],
+  departements = [],
+  services = [],
+  disabled,
+}) {
+  const [draftType, setDraftType] = useState("GLOBAL");
+  const [draftId, setDraftId] = useState("");
+
+  const directionsById = useMemo(
+    () => new Map((directions || []).map((d) => [String(d.id), d])),
+    [directions]
+  );
+  const departementsById = useMemo(
+    () => new Map((departements || []).map((d) => [String(d.id), d])),
+    [departements]
+  );
+  const servicesById = useMemo(
+    () => new Map((services || []).map((s) => [String(s.id), s])),
+    [services]
+  );
+
+  const normalized = useMemo(() => normalizeScopeList(scopes), [scopes]);
+  const showDefaultHint = normalized.length === 0;
+
+  const addScope = () => {
+    const type = normalizeScopeType(draftType) || "GLOBAL";
+    const id = type === "GLOBAL" ? null : normalizeScopeId(draftId);
+    if (type !== "GLOBAL" && id == null) return;
+
+    if (type === "GLOBAL") {
+      onChange([{ type: "GLOBAL", id: null }]);
+      return;
+    }
+
+    const next = normalized.filter((s) => normalizeScopeType(s.type) !== "GLOBAL");
+    const key = scopeKey({ type, id });
+    if (!next.some((s) => scopeKey(s) === key)) {
+      next.push({ type, id });
+    }
+    onChange(next);
+  };
+
+  const removeScope = (idx) => {
+    const next = normalized.filter((_, i) => i !== idx);
+    onChange(next);
+  };
+
+  const scopeOptions = [
+    { value: "GLOBAL", label: "Global" },
+    { value: "DIRECTION", label: "Direction" },
+    { value: "DEPARTEMENT", label: "Departement" },
+    { value: "SERVICE", label: "Service" },
+  ];
+
+  const idOptions = (() => {
+    if (draftType === "DIRECTION") return directions;
+    if (draftType === "DEPARTEMENT") return departements;
+    if (draftType === "SERVICE") return services;
+    return [];
+  })();
+
+  return (
+    <div className="mt-2 space-y-2">
+      {normalized.length ? (
+        <div className="flex flex-wrap gap-1">
+          {normalized.map((s, idx) => (
+            <span
+              key={`${scopeKey(s)}-${idx}`}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"
+            >
+              {buildScopeLabel(s, { directionsById, departementsById, servicesById })}
+              <button
+                type="button"
+                onClick={() => removeScope(idx)}
+                disabled={disabled}
+                className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[11px] text-gray-400 dark:text-gray-500">Par defaut: Global</div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
+          value={draftType}
+          onChange={(e) => {
+            setDraftType(e.target.value);
+            setDraftId("");
+          }}
+          disabled={disabled}
+        >
+          {scopeOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+
+        {draftType !== "GLOBAL" ? (
+          <select
+            className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
+            value={draftId}
+            onChange={(e) => setDraftId(e.target.value)}
+            disabled={disabled}
+          >
+            <option value="">Choisir...</option>
+            {idOptions.map((opt) => (
+              <option key={opt.id} value={String(opt.id)}>
+                {opt.nom}
+              </option>
+            ))}
+          </select>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={addScope}
+          disabled={disabled || (draftType !== "GLOBAL" && !draftId)}
+          className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800"
+        >
+          Ajouter
+        </button>
+      </div>
+
+      {showDefaultHint && (
+        <div className="text-[11px] text-gray-400 dark:text-gray-500">
+          Ajoute un scope pour restreindre. Sinon, acces global.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PeopleAdmin() {
   const { hasAnyPermission } = useAuth();
   const canUsers = hasAnyPermission(["USERS_MANAGE"]);
   const canAgents = hasAnyPermission(["AGENTS_MANAGE"]);
   const canPerms = hasAnyPermission(["PERMISSIONS_MANAGE"]);
+  const canRoles = hasAnyPermission(["ROLES_MANAGE"]);
+  const canUserRoles = hasAnyPermission(["USER_ROLES_MANAGE"]);
 
   const [loading, setLoading] = useState(true);
   const [metaLoading, setMetaLoading] = useState(true);
@@ -83,7 +262,7 @@ export default function PeopleAdmin() {
 
   const [userForm, setUserForm] = useState({ nom: "", prenom: "", is_active: true });
   const [secondaryRoles, setSecondaryRoles] = useState([]);
-  const [userPerms, setUserPerms] = useState({ allow: [], deny: [] });
+  const [userPerms, setUserPerms] = useState({ allow: [], deny: [], scopes: {} });
   const [userPermsLoading, setUserPermsLoading] = useState(false);
 
   const [agentForm, setAgentForm] = useState({
@@ -134,7 +313,7 @@ export default function PeopleAdmin() {
     setError("");
     try {
       const [rRes, aRes, dirRes, depRes, srvRes, pRes] = await Promise.all([
-        listRoles(),
+        canRoles ? listRoles() : Promise.resolve({ success: true, data: [] }),
         canAgents ? listAgents({ limit: 500 }) : Promise.resolve({ success: true, items: [] }),
         canAgents ? listDirections() : Promise.resolve({ success: true, data: [] }),
         canAgents ? listDepartements() : Promise.resolve({ success: true, data: [] }),
@@ -142,14 +321,14 @@ export default function PeopleAdmin() {
         canPerms ? listPermissions() : Promise.resolve({ success: true, data: [] }),
       ]);
 
-      if (!rRes?.success) throw new Error(rRes?.message || "Erreur chargement rôles");
+      if (canRoles && !rRes?.success) throw new Error(rRes?.message || "Erreur chargement rôles");
       if (canAgents && !aRes?.success) throw new Error(aRes?.message || "Erreur chargement agents");
       if (canAgents && !dirRes?.success) throw new Error(dirRes?.message || "Erreur chargement directions");
       if (canAgents && !depRes?.success) throw new Error(depRes?.message || "Erreur chargement départements");
       if (canAgents && !srvRes?.success) throw new Error(srvRes?.message || "Erreur chargement services");
       if (canPerms && !pRes?.success) throw new Error(pRes?.message || "Erreur chargement permissions");
 
-      setRoles(rRes?.data || rRes?.items || []);
+      setRoles(canRoles ? (rRes?.data || rRes?.items || []) : []);
       setAgents(aRes?.items || aRes?.data?.items || []);
       setDirections(dirRes?.data || dirRes?.items || []);
       setDepartements(depRes?.data || depRes?.items || []);
@@ -241,7 +420,7 @@ export default function PeopleAdmin() {
     if (!selectedUser) {
       setUserForm({ nom: "", prenom: "", is_active: true });
       setSecondaryRoles([]);
-      setUserPerms({ allow: [], deny: [] });
+      setUserPerms({ allow: [], deny: [], scopes: {} });
       setUserPermsLoading(false);
       return;
     }
@@ -260,12 +439,20 @@ export default function PeopleAdmin() {
     try {
       const res = await getUserPermissions(userId);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement permissions utilisateur");
+      const scopeMap = {};
+      const rawScopes = res?.data?.scopes || {};
+      for (const [rawCode, rawList] of Object.entries(rawScopes)) {
+        const code = normalizePermissionCode(rawCode);
+        if (!code) continue;
+        scopeMap[code] = normalizeScopeList(rawList);
+      }
       setUserPerms({
         allow: uniq((res?.data?.allowCodes || []).map(normalizePermissionCode)),
         deny: uniq((res?.data?.denyCodes || []).map(normalizePermissionCode)),
+        scopes: scopeMap,
       });
     } catch (e) {
-      setUserPerms({ allow: [], deny: [] });
+      setUserPerms({ allow: [], deny: [], scopes: {} });
       emitToast({ variant: "error", message: e?.message || "Erreur permissions utilisateur" });
     } finally {
       setUserPermsLoading(false);
@@ -274,7 +461,7 @@ export default function PeopleAdmin() {
 
   useEffect(() => {
     if (!selectedUser || !canPerms) {
-      setUserPerms({ allow: [], deny: [] });
+      setUserPerms({ allow: [], deny: [], scopes: {} });
       setUserPermsLoading(false);
       return;
     }
@@ -349,6 +536,10 @@ export default function PeopleAdmin() {
 
   const saveSecondaryRoles = async () => {
     if (!selectedUser?.id && !selectedUser?.uuid) return;
+    if (!canUserRoles) {
+      emitToast({ variant: "error", message: "Permission USER_ROLES_MANAGE requise." });
+      return;
+    }
     const idOrUuid = selectedUser?.uuid || selectedUser?.id;
     setSaving(true);
     try {
@@ -372,9 +563,19 @@ export default function PeopleAdmin() {
     if (!canPerms || !selectedUser?.id) return;
     setSaving(true);
     try {
+      const allowSet = new Set((userPerms.allow || []).map(normalizePermissionCode));
+      const scopesPayload = {};
+      for (const [rawCode, rawList] of Object.entries(userPerms.scopes || {})) {
+        const code = normalizePermissionCode(rawCode);
+        if (!code || !allowSet.has(code)) continue;
+        if (Array.isArray(rawList) && rawList.length) {
+          scopesPayload[code] = normalizeScopeList(rawList);
+        }
+      }
       const res = await setUserPermissions(selectedUser.id, {
         allowCodes: userPerms.allow || [],
         denyCodes: userPerms.deny || [],
+        scopes: scopesPayload,
       });
       if (!res?.success) throw new Error(res?.message || "Erreur update permissions utilisateur");
       emitToast({ variant: "success", message: "Permissions utilisateur mises à jour" });
@@ -496,8 +697,12 @@ export default function PeopleAdmin() {
 
       const idOrUuid = res?.data?.uuid || res?.data?.id;
       if (idOrUuid && (createForm.roles || []).length) {
-        const rolesRes = await setUserRoles(idOrUuid, uniq(createForm.roles));
-        if (!rolesRes?.success) throw new Error(rolesRes?.message || "Erreur update rôles");
+        if (!canUserRoles) {
+          emitToast({ variant: "error", message: "Permission USER_ROLES_MANAGE requise pour définir les rôles." });
+        } else {
+          const rolesRes = await setUserRoles(idOrUuid, uniq(createForm.roles));
+          if (!rolesRes?.success) throw new Error(rolesRes?.message || "Erreur update rôles");
+        }
       }
 
       setCreatedPassword(res?.data?.temporaryPassword || "");
@@ -715,7 +920,11 @@ export default function PeopleAdmin() {
 
                   <div className="mt-4">
                     <p className="text-xs text-gray-500 dark:text-gray-400">Rôles secondaires</p>
-                    {secondaryOptions.length === 0 ? (
+                    {!canRoles ? (
+                      <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        Permission ROLES_MANAGE requise.
+                      </div>
+                    ) : secondaryOptions.length === 0 ? (
                       <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">Aucun rôle disponible.</div>
                     ) : (
                       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -726,6 +935,7 @@ export default function PeopleAdmin() {
                               <input
                                 type="checkbox"
                                 checked={checked}
+                                disabled={!canUserRoles}
                                 onChange={(e) => {
                                   const next = e.target.checked
                                     ? uniq([...(secondaryRoles || []), rn])
@@ -739,12 +949,17 @@ export default function PeopleAdmin() {
                         })}
                       </div>
                     )}
+                    {canRoles && !canUserRoles ? (
+                      <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Permission USER_ROLES_MANAGE requise pour modifier.
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="flex justify-end gap-2 pt-3">
                     <button
                       onClick={saveSecondaryRoles}
-                      disabled={saving}
+                      disabled={saving || !canUserRoles}
                       className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
                     >
                       {saving ? <Loader inline size="sm" label="Traitement..." /> : "Enregistrer"}
@@ -782,42 +997,68 @@ export default function PeopleAdmin() {
                             if (!code) return null;
                             const label = String(perm.label || perm.code || "").trim();
                             const status = allowSet.has(code) ? "allow" : denySet.has(code) ? "deny" : "inherit";
+                            const scopesForCode = userPerms.scopes?.[code] || [];
                             return (
                               <div
                                 key={code}
-                                className="flex items-center justify-between gap-2 p-2 border border-gray-100 rounded-lg dark:border-gray-800"
+                                className="p-2 border border-gray-100 rounded-lg dark:border-gray-800"
                               >
-                                <div className="min-w-0">
-                                  <div className="text-xs text-gray-800 dark:text-gray-200 truncate">{label}</div>
-                                  <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{code}</div>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-xs text-gray-800 dark:text-gray-200 truncate">{label}</div>
+                                    <div className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{code}</div>
+                                  </div>
+                                  <select
+                                    className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
+                                    value={status}
+                                    onChange={(e) => {
+                                      const next = e.target.value;
+                                      setUserPerms((prev) => {
+                                        const allow = new Set((prev.allow || []).map(normalizePermissionCode));
+                                        const deny = new Set((prev.deny || []).map(normalizePermissionCode));
+                                        const scopes = { ...(prev.scopes || {}) };
+                                        if (next === "allow") {
+                                          allow.add(code);
+                                          deny.delete(code);
+                                          if (!scopes[code]) scopes[code] = [];
+                                        } else if (next === "deny") {
+                                          deny.add(code);
+                                          allow.delete(code);
+                                          delete scopes[code];
+                                        } else {
+                                          allow.delete(code);
+                                          deny.delete(code);
+                                          delete scopes[code];
+                                        }
+                                        return { allow: Array.from(allow), deny: Array.from(deny), scopes };
+                                      });
+                                    }}
+                                    disabled={saving}
+                                  >
+                                    <option value="inherit">Hériter</option>
+                                    <option value="allow">Autoriser</option>
+                                    <option value="deny">Refuser</option>
+                                  </select>
                                 </div>
-                                <select
-                                  className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
-                                  value={status}
-                                  onChange={(e) => {
-                                    const next = e.target.value;
-                                    setUserPerms((prev) => {
-                                      const allow = new Set((prev.allow || []).map(normalizePermissionCode));
-                                      const deny = new Set((prev.deny || []).map(normalizePermissionCode));
-                                      if (next === "allow") {
-                                        allow.add(code);
-                                        deny.delete(code);
-                                      } else if (next === "deny") {
-                                        deny.add(code);
-                                        allow.delete(code);
-                                      } else {
-                                        allow.delete(code);
-                                        deny.delete(code);
-                                      }
-                                      return { allow: Array.from(allow), deny: Array.from(deny) };
-                                    });
-                                  }}
-                                  disabled={saving}
-                                >
-                                  <option value="inherit">Hériter</option>
-                                  <option value="allow">Autoriser</option>
-                                  <option value="deny">Refuser</option>
-                                </select>
+
+                                {status === "allow" ? (
+                                  <PermissionScopeEditor
+                                    scopes={scopesForCode}
+                                    onChange={(nextScopes) => {
+                                      setUserPerms((prev) => ({
+                                        ...prev,
+                                        scopes: {
+                                          ...(prev.scopes || {}),
+                                          [code]: normalizeScopeList(nextScopes),
+                                        },
+                                      }));
+                                    }}
+                                    directions={directions}
+                                    departements={departements}
+                                    services={services}
+                                    disabled={saving}
+                                  />
+                                ) : null}
                               </div>
                             );
                           });
@@ -1071,26 +1312,38 @@ export default function PeopleAdmin() {
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
                 Le rôle principal est défini dans la fiche Agent.
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {roleNames.map((rn) => {
-                  const checked = (createForm.roles || []).includes(rn);
-                  return (
-                    <label key={rn} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? uniq([...(createForm.roles || []), rn])
-                            : (createForm.roles || []).filter((x) => x !== rn);
-                          setCreateForm((p) => ({ ...p, roles: next }));
-                        }}
-                      />
-                      {rn}
-                    </label>
-                  );
-                })}
-              </div>
+              {!canRoles ? (
+                <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  Permission ROLES_MANAGE requise.
+                </div>
+              ) : (
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {roleNames.map((rn) => {
+                    const checked = (createForm.roles || []).includes(rn);
+                    return (
+                      <label key={rn} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!canUserRoles}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? uniq([...(createForm.roles || []), rn])
+                              : (createForm.roles || []).filter((x) => x !== rn);
+                            setCreateForm((p) => ({ ...p, roles: next }));
+                          }}
+                        />
+                        {rn}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {canRoles && !canUserRoles ? (
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Permission USER_ROLES_MANAGE requise pour modifier.
+                </div>
+              ) : null}
             </div>
 
             {createdPassword ? (

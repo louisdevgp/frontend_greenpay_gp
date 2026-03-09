@@ -12,6 +12,7 @@ import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import CreatePaiementModal from "./CreatePaiementModal";
+import { useRealtime } from "../../context/RealtimeContext.tsx";
 
 const STORAGE_KEY = "filters:paiements:pending";
 const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "receptionnee"]);
@@ -48,6 +49,7 @@ const initialState = {
 };
 
 export default function PaiementsPending() {
+  const { paiementsTick } = useRealtime();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState([]);
@@ -91,6 +93,10 @@ export default function PaiementsPending() {
   useEffect(() => {
     fetch();
   }, [state.page, state.pageSize, state.filters]);
+
+  useEffect(() => {
+    if (paiementsTick > 0) fetch();
+  }, [paiementsTick]);
 
   useEffect(() => {
     if (state.filters.statut || state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {

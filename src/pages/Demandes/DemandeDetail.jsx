@@ -49,6 +49,33 @@ function normalizeConditionSource(value) {
   return null;
 }
 
+function normalizeRoleName(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeValidationStopRole(value) {
+  if (!value) return null;
+  const v = String(value).trim().toUpperCase();
+  if (["DAF", "DGA", "DG"].includes(v)) return v;
+  return null;
+}
+
+function filterValidationStepsByStopRole(steps, stopRole) {
+  const list = Array.isArray(steps) ? steps : [];
+  if (!stopRole || !list.length) return list;
+  const stopLevels = list
+    .filter((s) => normalizeRoleName(s?.role_name) === stopRole)
+    .map((s) => Number(s?.level))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (!stopLevels.length) return list;
+  const stopLevel = Math.max(...stopLevels);
+  return list.filter((s) => {
+    const lvl = Number(s?.level);
+    if (!Number.isFinite(lvl)) return true;
+    return lvl <= stopLevel;
+  });
+}
+
 export default function DemandeDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
@@ -181,28 +208,37 @@ export default function DemandeDetail() {
     [statutLower]
   );
 
+  const validationStopRole = useMemo(
+    () => normalizeValidationStopRole(demande?.validation_stop_role),
+    [demande?.validation_stop_role]
+  );
+  const effectiveValidationSteps = useMemo(
+    () => filterValidationStepsByStopRole(demande?.validation_steps, validationStopRole),
+    [demande?.validation_steps, validationStopRole]
+  );
+
   const hasValidationEngaged = useMemo(() => {
-    const steps = demande?.validation_steps || [];
+    const steps = effectiveValidationSteps || [];
     return steps.some((step) => {
       const st = String(step?.status || "").toLowerCase();
       return st && !["en_attente", "bloque"].includes(st);
     });
-  }, [demande?.validation_steps]);
+  }, [effectiveValidationSteps]);
 
   const allValidationsApproved = useMemo(() => {
-    const steps = demande?.validation_steps || [];
+    const steps = effectiveValidationSteps || [];
     if (!steps.length) return false;
     return steps.every((step) => String(step?.status || "").toLowerCase() === "valide");
-  }, [demande?.validation_steps]);
+  }, [effectiveValidationSteps]);
 
   const pendingValidationStep = useMemo(() => {
-    const steps = (demande?.validation_steps || []).filter(
+    const steps = (effectiveValidationSteps || []).filter(
       (s) => String(s?.status || "").toLowerCase() === "en_attente"
     );
     if (!steps.length) return null;
     const sorted = [...steps].sort((a, b) => (Number(a?.level) || 0) - (Number(b?.level) || 0));
     return sorted[0] || null;
-  }, [demande?.validation_steps]);
+  }, [effectiveValidationSteps]);
 
   const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
   const pendingRole = String(pendingValidationStep?.role_name || "").toUpperCase();
@@ -217,22 +253,24 @@ export default function DemandeDetail() {
   const canReturnPending = canActOnPendingStep && hasPermission("VALIDATION_RETURN_FOR_MODIFICATION");
   const showValidationActions = canApprovePending || canRejectPending || canReturnPending;
   const isDirectorPending = pendingRole === "DIRECTEUR";
+  const canEditRole = ["DIRECTEUR", "DAF", "DGA", "DG"].includes(pendingRole);
   const isDirectorSameDirection =
     roles.includes("DIRECTEUR") &&
     demande?.direction_id != null &&
     user?.agent?.direction_id != null &&
     Number(demande.direction_id) === Number(user.agent.direction_id);
-  const canEditAsDirector =
+  const canEditAtPending =
     canUpdateDemande &&
-    isDirectorPending &&
-    (canActByAssignment || canActByDelegation || isDirectorSameDirection);
+    canEditRole &&
+    !!pendingValidationStep &&
+    (canActByAssignment || canActByDelegation || (isDirectorPending && isDirectorSameDirection));
   const canEdit = useMemo(() => {
     if (!demande || !user) return false;
     if (!canUpdateDemande) return false;
     const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
     if (isAModifier && (isOwner || isAdmin)) return true;
-    return canEditAsDirector;
-  }, [demande, user, isOwner, isAdmin, canUpdateDemande, canEditAsDirector]);
+    return canEditAtPending;
+  }, [demande, user, isOwner, isAdmin, canUpdateDemande, canEditAtPending]);
   const validationActionItem = useMemo(() => {
     if (!pendingValidationStep || !demande) return null;
     return { ...pendingValidationStep, demandes_paiement: demande };
@@ -814,7 +852,7 @@ export default function DemandeDetail() {
           </div>
 
           {/* Section Validation Steps */}
-          {demande.validation_steps && demande.validation_steps.length > 0 ? (
+          {effectiveValidationSteps && effectiveValidationSteps.length > 0 ? (
             <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
               <div className="text-sm font-medium text-gray-800 dark:text-white/90">Parcours validations</div>
               
@@ -830,7 +868,7 @@ export default function DemandeDetail() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
-                    {[...demande.validation_steps]
+                    {[...effectiveValidationSteps]
                       .sort((a, b) => Number(a.level) - Number(b.level))
                       .map((step) => {
                         const actor = validationActorLabel(step);
