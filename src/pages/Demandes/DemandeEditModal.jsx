@@ -9,6 +9,14 @@ function round2(v) {
   return Math.round(Number(v) * 100) / 100;
 }
 
+function normalizeConditionSource(value) {
+  if (!value) return null;
+  const v = String(value).trim().toUpperCase();
+  if (v === "DAF") return "DAF";
+  if (v === "DEMANDEUR") return "DEMANDEUR";
+  return null;
+}
+
 function Field({ label, children, error }) {
   return (
     <div className="mb-4">
@@ -27,6 +35,28 @@ function isItemActive(it) {
   const puStr = String(it?.prix_unitaire ?? "").trim();
   const hasQty = qStr !== "" && qStr !== "1";
   return designation || unite || hasQty || puStr;
+}
+
+function buildInitialConditions(demande) {
+  const list = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
+  const totalRaw = demande?.montant_net != null ? demande.montant_net : demande?.montant;
+  const total = Number(totalRaw) || 0;
+  const demandeur = list.filter((c) => normalizeConditionSource(c?.source) === "DEMANDEUR");
+  const mapped = demandeur.map((c, idx) => {
+    const pct =
+      c?.pourcentage != null
+        ? Number(c.pourcentage)
+        : total > 0 && c?.montant_prevu != null
+          ? (Number(c.montant_prevu) / total) * 100
+          : null;
+    const pctStr = Number.isFinite(pct) ? String(Math.round(pct * 100) / 100) : "";
+    return {
+      label: String(c?.label || `Tranche ${idx + 1}`),
+      pourcentage: pctStr,
+      condition_texte: c?.condition_texte ? String(c.condition_texte) : "",
+    };
+  });
+  return mapped.length ? mapped : [{ label: "", pourcentage: "", condition_texte: "" }];
 }
 
 export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
@@ -53,6 +83,7 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [conditions, setConditions] = useState(() => buildInitialConditions(demande));
 
   const itemsTotal = useMemo(() => {
     if (!form) return 0;
@@ -116,6 +147,26 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
     }));
   };
 
+  const addCondition = () => {
+    setConditions((prev) => [
+      ...prev,
+      { label: "", pourcentage: "", condition_texte: "" }
+    ]);
+  };
+
+  const removeCondition = (index) => {
+    if (conditions.length <= 1) return;
+    setConditions((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const setCondition = (index, field, value) => {
+    setConditions((prev) =>
+      prev.map((cond, idx) =>
+        idx === index ? { ...cond, [field]: value } : cond
+      )
+    );
+  };
+
   const addItem = () => {
     setForm((p) => ({
       ...p,
@@ -150,6 +201,30 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
       }
     });
 
+    // Validation des conditions de paiement
+    let sumPct = 0;
+    let hasActiveConditions = false;
+    conditions.forEach((c, idx) => {
+      const label = String(c.label || "").trim();
+      const pctRaw = String(c.pourcentage || "").trim();
+      const txt = String(c.condition_texte || "").trim();
+      const isActive = label || pctRaw || txt;
+      if (!isActive) return;
+      hasActiveConditions = true;
+
+      const pct = Number(c.pourcentage);
+      if (!label) newErrors[`condition_${idx}_label`] = "Libelle requis";
+      if (!Number.isFinite(pct) || pct <= 0) {
+        newErrors[`condition_${idx}_pourcentage`] = "Pourcentage requis";
+      } else {
+        sumPct += pct;
+      }
+    });
+
+    if (hasActiveConditions && Math.abs(sumPct - 100) > 0.01) {
+      newErrors.conditions = "La somme des pourcentages doit etre 100%";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -174,6 +249,7 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
         remise_valeur: demande.remise_valeur ? String(demande.remise_valeur) : "",
       });
     }
+    setConditions(buildInitialConditions(demande));
     setErrors({});
     setLoading(false);
   };
@@ -191,6 +267,14 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
 
     setLoading(true);
     try {
+      const customConditions = conditions
+        .filter((c) => String(c.label || "").trim() && String(c.pourcentage || "").trim())
+        .map((c) => ({
+          label: String(c.label || "").trim(),
+          pourcentage: Number(c.pourcentage),
+          condition_texte: String(c.condition_texte || "").trim() || null,
+        }));
+
       const payload = {
         motif: form.motif.trim(),
         description: form.description.trim() || null,
@@ -209,6 +293,7 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
             unite: it.unite.trim() || null,
           }))
           .filter((it) => it.designation), // Supprimer les lignes vides
+        ...(customConditions.length ? { conditions_paiement_custom: customConditions } : {}),
       };
 
       const res = await updateDemande(demande.id, payload);
@@ -418,6 +503,91 @@ export default function DemandeEditModal({ open, onClose, demande, onSaved }) {
               </div>
             </div>
           )}
+        </div>
+
+        <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+          <h2 className="text-lg font-medium text-gray-800 dark:text-white/90 mb-4">Conditions de paiement</h2>
+
+          {errors.conditions ? (
+            <p className="mb-3 text-xs text-red-600 dark:text-red-400">{errors.conditions}</p>
+          ) : null}
+
+          {conditions.map((condition, idx) => {
+            const pct = Number(condition.pourcentage);
+            const montantAuto =
+              Number.isFinite(pct) && pct > 0 ? round2((montantNet * pct) / 100) : 0;
+            return (
+              <div
+                key={idx}
+                className="grid grid-cols-1 gap-3 mb-3 p-3 border border-gray-200 rounded-lg dark:border-gray-800"
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                  <div className="sm:col-span-4">
+                    <label className="block text-xs text-gray-500 dark:text-gray-400">Libelle *</label>
+                    <input
+                      type="text"
+                      value={condition.label}
+                      onChange={(e) => setCondition(idx, "label", e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-200 rounded outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="ex: Acompte 30%"
+                    />
+                    {errors[`condition_${idx}_label`] ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors[`condition_${idx}_label`]}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-gray-500 dark:text-gray-400">%</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={condition.pourcentage}
+                      onChange={(e) => setCondition(idx, "pourcentage", e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-200 rounded outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="0"
+                    />
+                    {errors[`condition_${idx}_pourcentage`] ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors[`condition_${idx}_pourcentage`]}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="sm:col-span-6">
+                    <label className="block text-xs text-gray-500 dark:text-gray-400">Condition (optionnel)</label>
+                    <input
+                      type="text"
+                      value={condition.condition_texte}
+                      onChange={(e) => setCondition(idx, "condition_texte", e.target.value)}
+                      className="w-full px-2 py-1 text-sm border border-gray-200 rounded outline-none dark:bg-gray-950 dark:border-gray-800"
+                      placeholder="Ex: a la reception"
+                    />
+                  </div>
+                </div>
+
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  Montant prevu: {formatMoney(montantAuto)} {form.devise}
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => removeCondition(idx)}
+                    disabled={conditions.length <= 1}
+                    className="px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded disabled:opacity-50 dark:hover:bg-red-950/30 dark:text-red-400"
+                  >
+                    Retirer
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={addCondition}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950/30"
+          >
+            + Ajouter une condition
+          </button>
         </div>
 
         <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">

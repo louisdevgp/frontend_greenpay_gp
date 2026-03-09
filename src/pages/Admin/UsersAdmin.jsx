@@ -10,6 +10,7 @@ import { listRoles } from "../../services/roles.service";
 import { setUserRoles } from "../../services/userRoles.service";
 import { getUserPermissions, listPermissions, setUserPermissions } from "../../services/permissions.admin.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
+import { normalizePermissionCode, normalizeScope, scopeKey } from "../../utils/permissionScopes";
 
 function uniq(arr) {
   return Array.from(new Set((arr || []).filter(Boolean)));
@@ -17,10 +18,6 @@ function uniq(arr) {
 
 function normalizeRoleName(role) {
   return String(role || "").trim().toUpperCase();
-}
-
-function normalizePermissionCode(code) {
-  return String(code || "").trim().toUpperCase();
 }
 
 function getPrimaryRole(user) {
@@ -39,6 +36,19 @@ function getSecondaryRoles(user) {
   return uniq(filtered);
 }
 
+function normalizeScopeList(list = []) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(list) ? list : []) {
+    const scope = normalizeScope(raw);
+    const key = scopeKey(scope);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(scope);
+  }
+  return out;
+}
+
 export default function UsersAdmin({ embedded = false } = {}) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,7 +60,7 @@ export default function UsersAdmin({ embedded = false } = {}) {
   const [rows, setRows] = useState([]);
   const [roles, setRoles] = useState([]);
   const [permissions, setPermissions] = useState([]);
-  const [userPerms, setUserPerms] = useState({ allow: [], deny: [] });
+  const [userPerms, setUserPerms] = useState({ allow: [], deny: [], scopes: {} });
   const [userPermsLoading, setUserPermsLoading] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -105,12 +115,20 @@ export default function UsersAdmin({ embedded = false } = {}) {
     try {
       const res = await getUserPermissions(userId);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement permissions utilisateur");
+      const scopeMap = {};
+      const rawScopes = res?.data?.scopes || {};
+      for (const [rawCode, rawList] of Object.entries(rawScopes)) {
+        const code = normalizePermissionCode(rawCode);
+        if (!code) continue;
+        scopeMap[code] = normalizeScopeList(rawList);
+      }
       setUserPerms({
         allow: uniq((res?.data?.allowCodes || []).map(normalizePermissionCode)),
         deny: uniq((res?.data?.denyCodes || []).map(normalizePermissionCode)),
+        scopes: scopeMap,
       });
     } catch (e) {
-      setUserPerms({ allow: [], deny: [] });
+      setUserPerms({ allow: [], deny: [], scopes: {} });
       emitToast({ variant: "error", message: e?.message || "Erreur permissions utilisateur" });
     } finally {
       setUserPermsLoading(false);
@@ -125,7 +143,7 @@ export default function UsersAdmin({ embedded = false } = {}) {
       is_active: !!u?.is_active,
       roles: getSecondaryRoles(u),
     });
-    setUserPerms({ allow: [], deny: [] });
+    setUserPerms({ allow: [], deny: [], scopes: {} });
     setEditOpen(true);
     await fetchUserOverrides(u);
   };
@@ -172,9 +190,19 @@ export default function UsersAdmin({ embedded = false } = {}) {
       if (!rolesRes?.success) throw new Error(rolesRes?.message || "Erreur update rôles");
 
       if (editUser?.id) {
+        const allowSet = new Set((userPerms.allow || []).map(normalizePermissionCode));
+        const scopesPayload = {};
+        for (const [rawCode, rawList] of Object.entries(userPerms.scopes || {})) {
+          const code = normalizePermissionCode(rawCode);
+          if (!code || !allowSet.has(code)) continue;
+          if (Array.isArray(rawList) && rawList.length) {
+            scopesPayload[code] = normalizeScopeList(rawList);
+          }
+        }
         const permRes = await setUserPermissions(editUser.id, {
           allowCodes: userPerms.allow || [],
           denyCodes: userPerms.deny || [],
+          scopes: scopesPayload,
         });
         if (!permRes?.success) throw new Error(permRes?.message || "Erreur update permissions utilisateur");
       }
@@ -649,17 +677,21 @@ export default function UsersAdmin({ embedded = false } = {}) {
                           setUserPerms((prev) => {
                             const allow = new Set((prev.allow || []).map(normalizePermissionCode));
                             const deny = new Set((prev.deny || []).map(normalizePermissionCode));
+                            const scopes = { ...(prev.scopes || {}) };
                             if (next === "allow") {
                               allow.add(code);
                               deny.delete(code);
+                              if (!scopes[code]) scopes[code] = [];
                             } else if (next === "deny") {
                               deny.add(code);
                               allow.delete(code);
+                              delete scopes[code];
                             } else {
                               allow.delete(code);
                               deny.delete(code);
+                              delete scopes[code];
                             }
-                            return { allow: Array.from(allow), deny: Array.from(deny) };
+                            return { allow: Array.from(allow), deny: Array.from(deny), scopes };
                           });
                         }}
                         disabled={saving}

@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 import { Link } from "react-router";
-import { listMyNotifications, markNotificationRead } from "../../services/notifications.service";
+import { useRealtime, type NotificationItem } from "../../context/RealtimeContext.tsx";
 
-type NotificationItem = {
-  id: number;
-  type?: string | null;
-  message?: string | null;
-  link?: string | null;
-  created_at?: string | null;
-  read_at?: string | null;
-};
+function resolveNotificationLink(n: NotificationItem) {
+  if (n?.meta && typeof n.meta === "object") {
+    if (n.meta.paiementUuid) return `/paiements/${n.meta.paiementUuid}`;
+    if (n.meta.receptionUuid) return `/receptions/${n.meta.receptionUuid}`;
+    if (n.meta.validationUuid) return `/validations/uuid/${n.meta.validationUuid}`;
+    if (n.meta.demandeUuid) return `/demandes/${n.meta.demandeUuid}`;
+  }
+
+  const type = String(n?.type || "").toLowerCase();
+  if (type === "validation_pending") return "/validations/pending";
+  if (type.startsWith("delegation_")) return "/delegations";
+  return "/";
+}
 
 function formatWhen(dt: string | number | Date | null | undefined) {
   if (!dt) return "";
@@ -22,8 +27,7 @@ function formatWhen(dt: string | number | Date | null | undefined) {
 
 export default function NotificationDropdown() {
   const [isOpen, setIsOpen] = useState(false);
-  const [items, setItems] = useState<NotificationItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { notifications, unreadCount, loadingNotifications, refreshNotifications, markAsRead } = useRealtime();
 
   function toggleDropdown() {
     setIsOpen(!isOpen);
@@ -33,43 +37,18 @@ export default function NotificationDropdown() {
     setIsOpen(false);
   }
 
-  const unreadCount = useMemo(
-    () => items.filter((n) => !n.read_at).length,
-    [items]
-  );
-
-  async function refresh() {
-    setLoading(true);
-    try {
-      const res = await listMyNotifications();
-      if (res?.success) {
-        setItems(Array.isArray(res.data) ? res.data : []);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
     if (isOpen) {
-      refresh();
+      refreshNotifications();
     }
-  }, [isOpen]);
+  }, [isOpen, refreshNotifications]);
 
   const handleClick = () => {
     toggleDropdown();
   };
 
   const onRead = async (notif: NotificationItem) => {
-    if (!notif?.id || notif.read_at) return;
-    try {
-      await markNotificationRead(notif.id);
-      setItems((prev) =>
-        prev.map((n) => (n.id === notif.id ? { ...n, read_at: new Date().toISOString() } : n))
-      );
-    } catch {
-      // toast handled by api interceptor
-    }
+    await markAsRead(notif);
   };
   return (
     <div className="relative">
@@ -129,18 +108,20 @@ export default function NotificationDropdown() {
           </button>
         </div>
         <ul className="flex flex-col h-auto overflow-y-auto custom-scrollbar">
-          {loading ? (
+          {loadingNotifications ? (
             <li className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
               Chargement...
             </li>
-          ) : items.length === 0 ? (
+          ) : notifications.length === 0 ? (
             <li className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
               Aucune notification.
             </li>
           ) : (
-            items.slice(0, 30).map((n) => (
+            notifications.slice(0, 30).map((n) => (
               <li key={n.id}>
                 <DropdownItem
+                  tag="a"
+                  to={resolveNotificationLink(n)}
                   onItemClick={() => {
                     onRead(n);
                     closeDropdown();

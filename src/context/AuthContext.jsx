@@ -26,6 +26,7 @@ import { setApiToken } from "../services/api";
  *  hasRole: (roleName: string) => boolean,
  *  hasAnyRole: (roleList?: string[]) => boolean,
  *  permissions: string[],
+ *  permissionScopes: Record<string, { type?: string, id?: number | null }[]>,
  *  hasPermission: (code: string) => boolean,
  *  hasAnyPermission: (codes?: string[]) => boolean
  * }} AuthContextValue
@@ -41,6 +42,7 @@ export function AuthProvider({ children }) {
   const user = auth?.user || null;
   const roles = user?.roles || [];
   const permissions = user?.permissions || [];
+  const permissionScopes = user?.permissionScopes || {};
 
   // 🔄 Au chargement: si token existe → /me pour valider et refresh user
   useEffect(() => {
@@ -179,10 +181,11 @@ export function AuthProvider({ children }) {
       hasRole,
       hasAnyRole,
       permissions,
+      permissionScopes,
       hasPermission,
       hasAnyPermission,
     }),
-    [loading, isAuthenticated, auth, user, roles, permissions]
+    [loading, isAuthenticated, auth, user, roles, permissions, permissionScopes]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -20,7 +20,7 @@ export async function getUserPermissions(userId) {
   return res.data;
 }
 
-export async function setUserPermissions(userId, { allowCodes = [], denyCodes = [] } = {}) {
-  const res = await api.put(`/permissions/users/${userId}`, { allowCodes, denyCodes });
+export async function setUserPermissions(userId, { allowCodes = [], denyCodes = [], scopes = {} } = {}) {
+  const res = await api.put(`/permissions/users/${userId}`, { allowCodes, denyCodes, scopes });
   return res.data;
 }

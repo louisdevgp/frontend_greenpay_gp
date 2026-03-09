@@ -9,6 +9,13 @@ import { loadPersistedState, savePersistedState, clearPersistedState } from "../
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import DatePicker from "../../components/form/date-picker";
 import { useAuth } from "../../context/AuthContext";
+import {
+  collectScopesForPermissions,
+  hasGlobalScope,
+  hasOrgScope,
+  normalizeScopeType,
+  scopeTypeLabel,
+} from "../../utils/permissionScopes";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
@@ -33,50 +40,54 @@ const initialState = {
   pageSize: 10,
 };
 
-function normalizeRole(r) {
-  return String(r || "").trim().toUpperCase();
+function getAllowedRoleViews({ canGlobal, canScoped, canSelf }) {
+  const views = [];
+  if (canGlobal) views.push(ROLE_VIEWS.GLOBAL);
+  if (canScoped) views.push(ROLE_VIEWS.RESPONSABLE);
+  if (canSelf) views.push(ROLE_VIEWS.DEMANDEUR);
+  return views.length ? views : [ROLE_VIEWS.DEMANDEUR];
 }
 
-function hasAnyRole(roles, list) {
-  const set = new Set((roles || []).map(normalizeRole));
-  return list.some((r) => set.has(normalizeRole(r)));
-}
-
-function getAllowedRoleViews(roles = []) {
-  if (hasAnyRole(roles, ["ADMIN", "DG", "DGA", "DAF", "COMPTABLE", "CAISSE"])) {
-    return [ROLE_VIEWS.GLOBAL];
-  }
-
-  if (hasAnyRole(roles, ["RESPONSABLE", "DIRECTEUR", "ASSISTANTE_TECHNIQUE"])) {
-    return [ROLE_VIEWS.RESPONSABLE];
-  }
-
-  return [ROLE_VIEWS.DEMANDEUR];
-}
-
-function getDefaultRoleView(roles = []) {
-  if (hasAnyRole(roles, ["ADMIN", "DG", "DGA", "DAF", "COMPTABLE", "CAISSE"])) return ROLE_VIEWS.GLOBAL;
-  if (hasAnyRole(roles, ["RESPONSABLE", "DIRECTEUR", "ASSISTANTE_TECHNIQUE"])) return ROLE_VIEWS.RESPONSABLE;
+function getDefaultRoleView(allowed = []) {
+  if (allowed.includes(ROLE_VIEWS.GLOBAL)) return ROLE_VIEWS.GLOBAL;
+  if (allowed.includes(ROLE_VIEWS.RESPONSABLE)) return ROLE_VIEWS.RESPONSABLE;
+  if (allowed.includes(ROLE_VIEWS.DEMANDEUR)) return ROLE_VIEWS.DEMANDEUR;
   return ROLE_VIEWS.DEMANDEUR;
 }
 
-function getRoleViewLabel(roleView, roles = []) {
+function getRoleViewLabel(roleView, scopes = []) {
   if (roleView === ROLE_VIEWS.DEMANDEUR) return "Mes demandes";
   if (roleView === ROLE_VIEWS.GLOBAL) return "Toutes les directions";
   if (roleView === ROLE_VIEWS.RESPONSABLE) {
-    if (hasAnyRole(roles, ["ASSISTANTE_TECHNIQUE"])) return "Direction (assistante technique)";
-    if (hasAnyRole(roles, ["DIRECTEUR"])) return "Direction (directeur)";
-    if (hasAnyRole(roles, ["RESPONSABLE"])) return "Direction (responsable)";
-    return "Ma direction";
+    const types = new Set(
+      (scopes || [])
+        .map((s) => normalizeScopeType(s?.type))
+        .filter((t) => t && t !== "GLOBAL")
+    );
+    if (types.size === 1) {
+      const only = Array.from(types)[0];
+      return scopeTypeLabel(only);
+    }
+    if (types.size > 1) return "Perimetre combine";
+    return "Perimetre restreint";
   }
-  return "Vue personnalisée";
+  return "Vue personnalisee";
 }
 
 export default function DemandesAllList() {
-  const { user } = useAuth();
-  const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-  const allowedRoleViews = useMemo(() => getAllowedRoleViews(roles), [roles]);
-  const defaultRoleView = useMemo(() => getDefaultRoleView(roles), [roles]);
+  const { user, hasPermission } = useAuth();
+  const listScopes = useMemo(
+    () => collectScopesForPermissions(user, ["DEMANDE_LIST", "DEMANDE_LIST_ALL"]),
+    [user]
+  );
+  const canGlobal = hasGlobalScope(listScopes);
+  const canScoped = hasOrgScope(listScopes);
+  const canSelf = hasPermission("DEMANDE_LIST_SELF");
+  const allowedRoleViews = useMemo(
+    () => getAllowedRoleViews({ canGlobal, canScoped, canSelf }),
+    [canGlobal, canScoped, canSelf]
+  );
+  const defaultRoleView = useMemo(() => getDefaultRoleView(allowedRoleViews), [allowedRoleViews]);
   const showRoleView = allowedRoleViews.length > 1;
 
   const [loading, setLoading] = useState(true);
@@ -199,7 +210,7 @@ export default function DemandesAllList() {
           <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Toutes les demandes</h1>
           {showRoleView && state.filters.roleView && (
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Vue: {getRoleViewLabel(state.filters.roleView, roles)}
+              Vue: {getRoleViewLabel(state.filters.roleView, listScopes)}
             </p>
           )}
         </div>

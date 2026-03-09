@@ -54,7 +54,6 @@ import DelegationsAdmin from "./pages/Admin/DelegationsAdmin";
 import DirectionsAdmin from "./pages/Admin/DirectionsAdmin";
 import DepartementsAdmin from "./pages/Admin/DepartementsAdmin";
 import ServicesAdmin from "./pages/Admin/ServicesAdmin";
-import PermissionsAdmin from "./pages/Admin/PermissionsAdmin";
 
 
 // (optionnel) page 403
@@ -117,13 +116,13 @@ export default function App() {
               </Route>
 
               {/* Demandes */}
-              <Route element={<PermissionGuard allow={["DEMANDE_LIST"]} />}>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL"]} />}>
                 <Route path="/demandes/all" element={<DemandesAllList />} />
               </Route>
               <Route element={<PermissionGuard allow={["DEMANDE_LIST_SELF"]} />}>
                 <Route path="/demandes/my" element={<DemandesMyList />} />
               </Route>
-              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_SELF", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_SELF", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
                 <Route path="/demandes/:uuid" element={<DemandeDetail />} />
               </Route>
               <Route element={<PermissionGuard allow={["DEMANDE_CREATE"]} />}>
@@ -143,7 +142,7 @@ export default function App() {
               </Route>
 
               {/* Delegations (non-admin autorise, mais controle cote API) */}
-              <Route element={<PermissionGuard allow={["VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
+              <Route element={<PermissionGuard allow={["DELEGATIONS_MANAGE"]} />}>
                 <Route path="/delegations" element={<DelegationsAdmin />} />
               </Route>
               {/* Admin : pilote par permissions (DB) */}
@@ -152,10 +151,6 @@ export default function App() {
                 <Route path="/admin/users" element={<PeopleAdmin />} />
                 <Route path="/admin/agents" element={<PeopleAdmin />} />
                 <Route path="/admin/hierarchy" element={<PeopleAdmin />} />
-              </Route>
-
-              <Route element={<PermissionGuard allow={["PERMISSIONS_MANAGE"]} />}>
-                <Route path="/admin/permissions" element={<PermissionsAdmin />} />
               </Route>
 
               {/* anciennes pages dediees supprimees au profit de la vue unique */}
