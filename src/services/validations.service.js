@@ -18,6 +18,16 @@ export async function approveValidation(id, payload = {}) {
   return res.data;
 }
 
+export async function startValidationSignature(id, payload = {}) {
+  const res = await api.post(`/validations/${id}/signature/start`, payload);
+  return res.data;
+}
+
+export async function completeValidationSignature(id) {
+  const res = await api.post(`/validations/${id}/signature/complete`);
+  return res.data;
+}
+
 // Rejeter
 export async function rejectValidation(id, payload = {}) {
   const res = await api.post(`/validations/${id}/reject`, payload);

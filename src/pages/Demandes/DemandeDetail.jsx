@@ -1,8 +1,7 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { getDemande, deleteDemande, closeDemande, getDemandeValidationHistory } from "../../services/demandes.services";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
-import { api } from "../../services/api";
 import { useAuth } from "../../context/AuthContext";
 import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
@@ -14,7 +13,7 @@ import { emitToast } from "../../services/toastBus";
 import { downloadFile } from "../../utils/downloadFile";
 import { labelDemandeStatut, labelValidationStepStatus, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
-import { agentDisplayName, validationActorLabel } from "../../utils/validationActors";
+import { agentDisplayName, validationActorLabel, isDelegatedValidation } from "../../utils/validationActors";
 import Loader from "../../components/common/Loader";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 
@@ -60,6 +59,15 @@ function normalizeValidationStopRole(value) {
   return null;
 }
 
+function candidateScopesForDemande(demande) {
+  const scopes = ["GLOBAL"];
+  if (!demande) return scopes;
+  if (demande.direction_id) scopes.push(`DIRECTION:${Number(demande.direction_id)}`);
+  if (demande.departement_id) scopes.push(`DEPARTEMENT:${Number(demande.departement_id)}`);
+  if (demande.service_id) scopes.push(`SERVICE:${Number(demande.service_id)}`);
+  return scopes;
+}
+
 function filterValidationStepsByStopRole(steps, stopRole) {
   const list = Array.isArray(steps) ? steps : [];
   if (!stopRole || !list.length) return list;
@@ -79,7 +87,7 @@ function filterValidationStepsByStopRole(steps, stopRole) {
 export default function DemandeDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
-  const { user, hasPermission, hasAnyPermission } = useAuth();
+  const { user, hasPermission, hasAnyPermission, refreshMe } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
   const canUpdateDemande = hasPermission("DEMANDE_UPDATE");
   const canDeleteDemande = hasPermission("DEMANDE_DELETE");
@@ -125,18 +133,23 @@ export default function DemandeDetail() {
 
   const fetchDemande = async () => {
     setLoading(true);
+    setPaiementsLoading(true);
     setError("");
+    setPaiements([]);
     try {
       const res = await getDemande(uuid);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement demande");
       setDemande(res.data);
+      setPaiements(Array.isArray(res?.data?.paiements) ? res.data.paiements : []);
       if (uuid) {
         await fetchValidationHistory(uuid);
       }
     } catch (e) {
       setError(e?.message || "Erreur inconnue");
+      setPaiements([]);
     } finally {
       setLoading(false);
+      setPaiementsLoading(false);
     }
   };
 
@@ -168,20 +181,6 @@ export default function DemandeDetail() {
     }
   };
 
-  const fetchPaiements = async (demandeId) => {
-    if (!demandeId) return;
-    setPaiementsLoading(true);
-    try {
-      const res = await api.get(`/paiements/by-demande/${demandeId}`);
-      if (res?.data?.success) setPaiements(res.data.data || []);
-      else setPaiements([]);
-    } catch (e) {
-      setPaiements([]);
-    } finally {
-      setPaiementsLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchDemande();
   }, [uuid]);
@@ -189,7 +188,6 @@ export default function DemandeDetail() {
   useEffect(() => {
     if (demande?.id) {
       fetchDocs(demande.id);
-      fetchPaiements(demande.id);
     }
   }, [demande?.id]);
 
@@ -246,12 +244,39 @@ export default function DemandeDetail() {
     pendingValidationStep?.validator_id != null &&
     agentId != null &&
     Number(pendingValidationStep.validator_id) === Number(agentId);
-  const canActByDelegation = pendingRole && delegatedRoles.includes(pendingRole);
+  const candidateScopes = useMemo(
+    () => candidateScopesForDemande(demande),
+    [demande?.direction_id, demande?.departement_id, demande?.service_id]
+  );
+  const canActByDelegation = useMemo(() => {
+    if (!pendingValidationStep || !pendingRole) return false;
+    const delegations = user?.agent?.delegations || [];
+    if (delegations.length > 0) {
+      const validatorId = pendingValidationStep?.validator_id != null ? Number(pendingValidationStep.validator_id) : null;
+      return delegations.some((d) => {
+        const roleName = normalizeRoleName(d?.role_name);
+        if (!roleName || roleName !== pendingRole) return false;
+        if (validatorId != null && Number(d?.principal_id) !== validatorId) return false;
+        const scope = d?.scope != null && String(d.scope).trim() !== "" ? String(d.scope).trim() : null;
+        if (scope && !candidateScopes.includes(scope)) return false;
+        return true;
+      });
+    }
+    return pendingRole && delegatedRoles.includes(pendingRole);
+  }, [pendingValidationStep, pendingRole, user?.agent?.delegations, candidateScopes, delegatedRoles]);
   const canActOnPendingStep = !!pendingValidationStep && (canActByAssignment || canActByDelegation);
   const canApprovePending = canActOnPendingStep && hasPermission("VALIDATION_APPROVE");
   const canRejectPending = canActOnPendingStep && hasPermission("VALIDATION_REJECT");
   const canReturnPending = canActOnPendingStep && hasPermission("VALIDATION_RETURN_FOR_MODIFICATION");
   const showValidationActions = canApprovePending || canRejectPending || canReturnPending;
+  const refreshTriedRef = useRef(false);
+  useEffect(() => {
+    if (!pendingValidationStep) return;
+    if (canActOnPendingStep) return;
+    if (refreshTriedRef.current) return;
+    refreshTriedRef.current = true;
+    refreshMe?.().catch(() => {});
+  }, [pendingValidationStep, canActOnPendingStep, refreshMe]);
   const isDirectorPending = pendingRole === "DIRECTEUR";
   const canEditRole = ["DIRECTEUR", "DAF", "DGA", "DG"].includes(pendingRole);
   const isDirectorSameDirection =
@@ -872,6 +897,7 @@ export default function DemandeDetail() {
                       .sort((a, b) => Number(a.level) - Number(b.level))
                       .map((step) => {
                         const actor = validationActorLabel(step);
+                        const delegated = isDelegatedValidation(step);
                         return (
                           <tr key={step.id}>
                             <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{step.role_name}</td>
@@ -893,6 +919,9 @@ export default function DemandeDetail() {
                                 <div>{actor?.primary || "-"}</div>
                                 {actor?.secondary ? (
                                   <div className="text-xs text-gray-500 dark:text-gray-400">{actor.secondary}</div>
+                                ) : null}
+                                {delegated ? (
+                                  <div className="text-[11px] text-emerald-600 dark:text-emerald-300">Délégué</div>
                                 ) : null}
                               </div>
                             </td>
@@ -1233,6 +1262,11 @@ export default function DemandeDetail() {
                   Étape en attente: {pendingValidationStep.role_name || "-"} (niveau {pendingValidationStep.level ?? "-"})
                 </div>
               ) : null}
+              {canActByDelegation && !canActByAssignment ? (
+                <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
+                  Vous agissez par délégation.
+                </div>
+              ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 {canApprovePending ? (
                   <button
@@ -1284,3 +1318,4 @@ function Info({ label, value }) {
     </div>
   );
 }
+

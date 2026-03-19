@@ -21,3 +21,13 @@ export async function createPaiement(payload) {
   const res = await api.post("/paiements/pay", payload);
   return res.data; // { success, data: paiement }
 }
+
+export async function startPaiementSignature(payload) {
+  const res = await api.post("/paiements/signature/start", payload);
+  return res.data;
+}
+
+export async function completePaiementSignature(sessionId) {
+  const res = await api.post("/paiements/signature/complete", { session_id: sessionId });
+  return res.data;
+}

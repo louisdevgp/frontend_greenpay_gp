@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+﻿import React, { useState, useMemo } from "react";
 import { createDemande } from "../../services/demandes.services";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
@@ -302,40 +302,39 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
       };
 
       const res = await createDemande(payload);
-      if (res?.success) {
-        if (uploadFiles.length) {
-          try {
-            setUploadingDocs(true);
-            const typeDoc =
-              uploadType === "autre"
-                ? `autre:${String(uploadTypeAutre || "").trim()}`
-                : uploadType;
-            await uploadManyDocuments({
-              files: uploadFiles,
-              demande_id: res.data?.id,
-              type_document: typeDoc,
-            });
-          } catch (e) {
-            emitToast({
-              variant: "error",
-              title: "Erreur",
-              message: e?.message || "Upload des documents échoué",
-            });
-          } finally {
-            setUploadingDocs(false);
-          }
-        }
+      if (!res?.success) throw new Error(res?.message || "Erreur creation demande");
 
-        emitToast({
-          variant: "success",
-          title: "Succès",
-          message: "Demande créée avec succès",
-        });
-        onCreated?.(res.data);
-        close();
-      } else {
-        throw new Error(res?.message || "Erreur création demande");
+      const demande = res?.data;
+      if (uploadFiles.length && demande?.id) {
+        try {
+          setUploadingDocs(true);
+          const typeDoc =
+            uploadType === "autre"
+              ? `autre:${String(uploadTypeAutre || "").trim()}`
+              : uploadType;
+          await uploadManyDocuments({
+            files: uploadFiles,
+            demande_id: demande.id,
+            type_document: typeDoc,
+          });
+        } catch (e) {
+          emitToast({
+            variant: "error",
+            title: "Erreur",
+            message: e?.message || "Upload des documents echoue",
+          });
+        } finally {
+          setUploadingDocs(false);
+        }
       }
+
+      emitToast({
+        variant: "success",
+        title: "Succes",
+        message: "Demande creee avec succes",
+      });
+      onCreated?.(demande);
+      close();
     } catch (err) {
       emitToast(err?.message || "Erreur inconnue", "error");
     } finally {
@@ -352,7 +351,10 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
       showCloseButton={false}
       className="w-full max-w-4xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
     >
-      <FullscreenLoader show={loading || uploadingDocs} label="Traitement..." />
+      <FullscreenLoader
+        show={loading || uploadingDocs}
+        label="Traitement..."
+      />
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Créer une demande</h2>
@@ -361,7 +363,7 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
 
         <button
           type="button"
-          disabled={loading}
+          disabled={loading || uploadingDocs}
           className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
           onClick={close}
         >

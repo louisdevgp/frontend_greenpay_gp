@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FiCheckCircle, FiX } from "react-icons/fi";
-import { createPaiement } from "../../services/paiements.service";
+import { createPaiement, startPaiementSignature, completePaiementSignature } from "../../services/paiements.service";
 import { listAllDemandes } from "../../services/demandes.services";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
@@ -8,7 +8,10 @@ import { formatMoney } from "../../utils/formatUtils";
 import { uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
+import FirmaSignatureFrame from "../../components/common/FirmaSignatureFrame";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
+import { FIRMA_ENABLED } from "../../utils/firma";
+import { downloadFile } from "../../utils/downloadFile";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -43,6 +46,13 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
   const [uploadType, setUploadType] = useState("recu");
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
+  const [signatureUrl, setSignatureUrl] = useState("");
+  const [signatureSessionId, setSignatureSessionId] = useState("");
+  const [signatureRequestId, setSignatureRequestId] = useState("");
+  const [signatureUserId, setSignatureUserId] = useState("");
+  const [signatureError, setSignatureError] = useState("");
+  const [signatureCompleting, setSignatureCompleting] = useState(false);
+  const isSigning = FIRMA_ENABLED && Boolean(signatureUrl);
 
   const fetchDemandes = async () => {
     try {
@@ -94,6 +104,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
       conditions_source: "",
     });
     setError("");
+    setSignatureError("");
     setLoading(false);
     setDemandeResolved(null);
     autoMoyenRef.current = "";
@@ -101,10 +112,16 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     setUploadType("recu");
     setUploadTypeAutre("");
     setUploadFiles([]);
+    setSignatureUrl("");
+    setSignatureSessionId("");
+    setSignatureRequestId("");
+    setSignatureUserId("");
+    setSignatureError("");
+    setSignatureCompleting(false);
   };
 
   const close = () => {
-    if (loading) return;
+    if (loading || signatureCompleting) return;
     reset();
     onClose();
   };
@@ -132,19 +149,84 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
         throw new Error("Veuillez préciser le type (Autre)");
       }
 
-      const res = await createPaiement({
+      const payload = {
         demande_id: Number(form.demande_id),
         type_paiement: form.type_paiement,
         montant: Number(form.montant),
         moyen_paiement: form.moyen_paiement,
         conditions_source: conditionsSource,
-      });
+      };
 
-      if (!res?.success) throw new Error(res?.message || "Erreur création paiement");
+      if (!FIRMA_ENABLED) {
+        const res = await createPaiement(payload);
+        if (!res?.success) throw new Error(res?.message || "Creation paiement impossible");
+
+        const paiement = res?.data;
+        if (hasUploads) {
+          const paiementId = paiement?.id || paiement?.paiement?.id;
+          if (!paiementId) throw new Error("Paiement cree, mais id introuvable pour upload");
+          await uploadManyDocuments({
+            files: uploadFiles,
+            type_document: typeDoc,
+            paiement_id: paiementId,
+          });
+        }
+
+        emitToast("Paiement cree avec succes", "success");
+        onCreated?.(paiement);
+        close();
+        return;
+      }
+
+      const res = await startPaiementSignature(payload);
+
+      if (!res?.success) throw new Error(res?.message || "Signature impossible");
+
+      const data = res?.data || {};
+      const signingUrl = data.signingUrl || data.signing_url;
+      if (!signingUrl) throw new Error("Lien de signature introuvable");
+      setSignatureUrl(signingUrl);
+      setSignatureSessionId(data.sessionId || data.session_id || "");
+      setSignatureRequestId(data.signingRequestId || data.signing_request_id || "");
+      setSignatureUserId(data.signingRequestUserId || data.signing_request_user_id || "");
+      setSignatureError("");
+      return;
+
+    } catch (err) {
+      setError(err?.message || "Erreur inconnue");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const completeSignature = async () => {
+    if (!signatureSessionId) return;
+    if (signatureCompleting) return;
+    setSignatureError("");
+
+    try {
+      setSignatureCompleting(true);
+      const res = await completePaiementSignature(signatureSessionId);
+      if (!res?.success) throw new Error(res?.message || "Signature non terminee");
+
+      const paiement = res?.data;
+      if (signatureSessionId) {
+        const filename = paiement?.uuid
+          ? `signature_paiement_${paiement.uuid}.pdf`
+          : `signature_paiement_${signatureSessionId}.pdf`;
+        void downloadFile(`/signatures/sessions/${signatureSessionId}/download`, filename).catch(() => {
+          emitToast({ variant: "warning", message: "Preuve de signature indisponible." });
+        });
+      }
+      const hasUploads = uploadFiles.length > 0;
+      const typeDoc =
+        uploadType === "autre"
+          ? `autre:${String(uploadTypeAutre || "").trim()}`
+          : uploadType;
 
       if (hasUploads) {
-        const paiementId = res?.data?.id || res?.data?.paiement?.id;
-        if (!paiementId) throw new Error("Paiement créé, mais id introuvable pour upload");
+        const paiementId = paiement?.id || paiement?.paiement?.id;
+        if (!paiementId) throw new Error("Paiement cree, mais id introuvable pour upload");
         await uploadManyDocuments({
           files: uploadFiles,
           type_document: typeDoc,
@@ -152,13 +234,15 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
         });
       }
 
-      emitToast("Paiement créé avec succès", "success");
-      onCreated?.(res.data);
+      emitToast("Paiement cree avec succes", "success");
+      onCreated?.(paiement);
       close();
     } catch (err) {
-      setError(err?.message || "Erreur inconnue");
+      const msg = err?.message || "Erreur inconnue";
+      setSignatureError(msg);
+      emitToast({ variant: "error", message: msg });
     } finally {
-      setLoading(false);
+      setSignatureCompleting(false);
     }
   };
 
@@ -310,9 +394,9 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
       isOpen={open}
       onClose={close}
       showCloseButton={false}
-      className="w-full max-w-2xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
+      className={`w-full ${isSigning ? "max-w-4xl" : "max-w-2xl"} rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800`}
     >
-      <FullscreenLoader show={loading} label="Traitement..." />
+      <FullscreenLoader show={loading || signatureCompleting} label={signatureCompleting ? "Signature..." : "Traitement..."} />
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Créer un paiement</h2>
@@ -321,7 +405,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
 
         <button
           type="button"
-          disabled={loading}
+          disabled={loading || signatureCompleting}
           title="Fermer"
           aria-label="Fermer"
           className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
@@ -331,12 +415,30 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
         </button>
       </div>
 
+      {signatureError ? (
+        <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+          {signatureError}
+        </div>
+      ) : null}
+
       {error ? (
         <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
           {error}
         </div>
       ) : null}
 
+      {isSigning ? (
+        <FirmaSignatureFrame
+          signingUrl={signatureUrl}
+          signatureRequestId={signatureRequestId}
+          signatureUserId={signatureUserId}
+          onCancel={close}
+          onComplete={completeSignature}
+          onError={setSignatureError}
+          busy={signatureCompleting}
+          title="Signer pour creer le paiement."
+        />
+      ) : (
       <form onSubmit={submit} className="mt-4 space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Demande</label>
@@ -511,6 +613,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
           </button>
         </div>
       </form>
+      )}
     </Modal>
   );
 }

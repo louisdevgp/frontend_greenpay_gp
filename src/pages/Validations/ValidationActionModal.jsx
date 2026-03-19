@@ -1,10 +1,18 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { FiCheckCircle, FiCornerUpLeft, FiX, FiXCircle } from "react-icons/fi";
-import { approveValidation, rejectValidation, returnValidationForModification } from "../../services/validations.service";
+import {
+  approveValidation,
+  startValidationSignature,
+  completeValidationSignature,
+  rejectValidation,
+  returnValidationForModification,
+} from "../../services/validations.service";
 import { Modal } from "../../components/ui/modal";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { emitToast } from "../../services/toastBus";
 import { formatMoney } from "../../utils/formatUtils";
+import { downloadFile } from "../../utils/downloadFile";
+import { FIRMA_ENABLED } from "../../utils/firma";
 
 const DAF_CRITERE4_LABEL = import.meta.env.VITE_DAF_CRITERE4_LABEL || "Moyen de paiement";
 
@@ -40,14 +48,28 @@ function normalizeValidationStopRole(value) {
 
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
   // mode: "approve" | "reject" | "return"
+  const makeDafCondition = (index, overrides = {}) => ({
+    label: `Tranche ${index + 1}`,
+    mode: "pct", // "pct" | "amount"
+    pourcentage: "",
+    montant_prevu: "",
+    condition_texte: "",
+    ...overrides,
+  });
+
   const [commentaire, setCommentaire] = useState("");
-  // On n'utilise plus les signatures
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [signatureUrl, setSignatureUrl] = useState("");
+  const [signatureRequestId, setSignatureRequestId] = useState("");
+  const [signatureUserId, setSignatureUserId] = useState("");
+  const [signatureError, setSignatureError] = useState("");
+  const [signatureCompleting, setSignatureCompleting] = useState(false);
 
   const role = useMemo(() => String(item?.role_name || "").toUpperCase(), [item?.role_name]);
   const demande = item?.demandes_paiement || null;
   const isDaf = role === "DAF";
+  const isSigning = Boolean(signatureUrl);
   const demandeurConditions = useMemo(() => {
     const list = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
     return list.filter((c) => normalizeConditionSource(c?.source) === "DEMANDEUR");
@@ -64,9 +86,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [validationStopRole, setValidationStopRole] = useState("DG"); // DAF | DGA | DG
   const [dafConditionsChoice, setDafConditionsChoice] = useState("daf"); // "daf" | "demandeur"
   const [dafConditionsMode, setDafConditionsMode] = useState("100/100"); // 100/100 | 70/30 | 50/50 | custom
-  const [dafConditions, setDafConditions] = useState([
-    { label: "", pourcentage: "", condition_texte: "" },
-  ]);
+  const [dafConditions, setDafConditions] = useState([makeDafCondition(0)]);
 
   const totalMontant = useMemo(() => {
     const raw = demande?.montant_net != null ? demande.montant_net : demande?.montant;
@@ -127,8 +147,20 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     return "Retourner pour modification";
   }, [mode]);
 
-  const close = () => {
+  const headerTitle = mode === "approve" && isSigning ? "Signature electronique" : title;
+  const headerSubtitle =
+    mode === "approve" && isSigning
+      ? "Signez pour valider definitivement la demande."
+      : mode === "approve"
+        ? "Ajouter un commentaire si besoin."
+        : mode === "reject"
+        ? "Commentaire obligatoire pour le rejet."
+        : "Commentaire obligatoire (motif du retour).";
+  const errorMessage = signatureError || error;
+
+  const close = (opts = {}) => {
     if (submitting) return;
+    if (signatureCompleting && !opts.force) return;
     setCommentaire("");
     setBudgetPrevu(null);
     setBudgetDisponible(null);
@@ -137,8 +169,13 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setValidationStopRole("DG");
     setDafConditionsChoice("daf");
     setDafConditionsMode("100/100");
-    setDafConditions([{ label: "", pourcentage: "", condition_texte: "" }]);
+    setDafConditions([makeDafCondition(0)]);
     setError("");
+    setSignatureUrl("");
+    setSignatureRequestId("");
+    setSignatureUserId("");
+    setSignatureError("");
+    setSignatureCompleting(false);
     onClose?.();
   };
 
@@ -155,16 +192,22 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       setDafConditionsChoice("daf");
       setDafConditionsMode("custom");
       setDafConditions(
-        dafExisting.map((c) => ({
-          label: String(c?.label || ""),
-          pourcentage: c?.pourcentage != null ? String(c.pourcentage) : "",
-          condition_texte: c?.condition_texte ? String(c.condition_texte) : "",
-        }))
+        dafExisting.map((c, idx) => {
+          const pctStr = c?.pourcentage != null ? String(c.pourcentage) : "";
+          const montantStr = c?.montant_prevu != null ? String(c.montant_prevu) : "";
+          const mode = montantStr && !pctStr ? "amount" : "pct";
+          return makeDafCondition(idx, {
+            mode,
+            pourcentage: pctStr,
+            montant_prevu: montantStr,
+            condition_texte: c?.condition_texte ? String(c.condition_texte) : "",
+          });
+        })
       );
     } else {
       setDafConditionsChoice(demandeurConditions.length > 0 ? "demandeur" : "daf");
       setDafConditionsMode("100/100");
-      setDafConditions([{ label: "", pourcentage: "", condition_texte: "" }]);
+      setDafConditions([makeDafCondition(0)]);
     }
   }, [
     open,
@@ -181,18 +224,33 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const addDafCondition = () => {
     setDafConditions((prev) => [
       ...prev,
-      { label: "", pourcentage: "", condition_texte: "" },
+      makeDafCondition(prev.length),
     ]);
   };
 
   const removeDafCondition = (index) => {
     if (dafConditions.length <= 1) return;
-    setDafConditions((prev) => prev.filter((_, idx) => idx !== index));
+    setDafConditions((prev) =>
+      prev
+        .filter((_, idx) => idx !== index)
+        .map((c, idx) => ({ ...c, label: `Tranche ${idx + 1}` }))
+    );
   };
 
   const setDafCondition = (index, field, value) => {
     setDafConditions((prev) =>
-      prev.map((c, idx) => (idx === index ? { ...c, [field]: value } : c))
+      prev.map((c, idx) => {
+        if (idx !== index) return c;
+        if (field === "mode") {
+          return {
+            ...c,
+            mode: value,
+            pourcentage: value === "pct" ? c.pourcentage : "",
+            montant_prevu: value === "amount" ? c.montant_prevu : "",
+          };
+        }
+        return { ...c, [field]: value };
+      })
     );
   };
 
@@ -202,18 +260,21 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setDafConditionsMode("custom");
     setDafConditions(
       demandeurConditions.map((c, idx) => {
+        const montantNum = c?.montant_prevu != null ? Number(c.montant_prevu) : null;
         const pct =
           c?.pourcentage != null
             ? Number(c.pourcentage)
-            : totalMontant > 0 && c?.montant_prevu != null
-              ? (Number(c.montant_prevu) / totalMontant) * 100
+            : totalMontant > 0 && montantNum != null
+              ? (montantNum / totalMontant) * 100
               : null;
         const pctStr = Number.isFinite(pct) ? String(Math.round(pct * 100) / 100) : "";
-        return {
-          label: String(c?.label || `Tranche ${idx + 1}`),
+        const mode = montantNum != null && !Number.isFinite(Number(c?.pourcentage)) ? "amount" : "pct";
+        return makeDafCondition(idx, {
+          mode,
           pourcentage: pctStr,
+          montant_prevu: montantNum != null ? String(montantNum) : "",
           condition_texte: c?.condition_texte ? String(c.condition_texte) : "",
-        };
+        });
       })
     );
   };
@@ -221,6 +282,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setSignatureError("");
 
     try {
       setSubmitting(true);
@@ -255,20 +317,34 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
           } else {
             if (dafConditionsMode === "custom") {
               const active = dafConditions.filter((c) => {
-                const label = String(c.label || "").trim();
                 const pct = String(c.pourcentage || "").trim();
+                const montant = String(c.montant_prevu || "").trim();
                 const txt = String(c.condition_texte || "").trim();
-                return label || pct || txt;
+                return pct || montant || txt;
               });
               if (!active.length) {
                 throw new Error("Definir les conditions de paiement");
               }
               let sumPct = 0;
               const custom = active.map((c, idx) => {
-                const label = String(c.label || "").trim();
-                const pctNum = toNumber(c.pourcentage);
-                if (!label) throw new Error(`Libelle requis (tranche ${idx + 1})`);
-                if (pctNum == null || pctNum <= 0) throw new Error(`Pourcentage invalide (tranche ${idx + 1})`);
+                const label = `Tranche ${idx + 1}`;
+                const modeValue = c.mode === "amount" ? "amount" : "pct";
+                let pctNum = null;
+                if (modeValue === "amount") {
+                  const montantNum = toNumber(c.montant_prevu);
+                  if (montantNum == null || montantNum <= 0) {
+                    throw new Error(`Montant invalide (tranche ${idx + 1})`);
+                  }
+                  if (!totalMontant || totalMontant <= 0) {
+                    throw new Error("Montant total invalide pour calculer les pourcentages");
+                  }
+                  pctNum = (montantNum / totalMontant) * 100;
+                } else {
+                  pctNum = toNumber(c.pourcentage);
+                  if (pctNum == null || pctNum <= 0) {
+                    throw new Error(`Pourcentage invalide (tranche ${idx + 1})`);
+                  }
+                }
                 sumPct += pctNum;
                 return {
                   label,
@@ -289,34 +365,50 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         dafExtraPayload = { ...dafExtraPayload, validation_stop_role: stopRoleNormalized };
       }
 
+      if (mode === "approve") {
+        const approvePayload = {
+          ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
+          ...(isDaf
+            ? {
+                budget_prevu: !!budgetPrevu,
+                budget_disponible: !!budgetDisponible,
+                paiement_immediat: !!paiementImmediat,
+                daf_critere4: dafCritere4 ? String(dafCritere4).trim() : null,
+                ...dafExtraPayload, // Envoyer le moyen de paiement comme chaîne
+              }
+            : {}),
+        };
+
+        if (!FIRMA_ENABLED) {
+          const res = await approveValidation(id, approvePayload);
+          if (!res?.success) throw new Error(res?.message || "Validation impossible");
+          emitToast({ variant: "success", message: "Validation effectuee" });
+          onDone?.();
+          close();
+          return;
+        }
+
+        const res = await startValidationSignature(id, approvePayload);
+        if (!res?.success) throw new Error(res?.message || "Signature impossible");
+        const data = res?.data || {};
+        const signingUrl = data.signingUrl || data.signing_url;
+        if (!signingUrl) throw new Error("Lien de signature introuvable");
+        setSignatureUrl(signingUrl);
+        setSignatureRequestId(data.signingRequestId || data.signing_request_id || "");
+        setSignatureUserId(data.signingRequestUserId || data.signing_request_user_id || "");
+        setSignatureError("");
+        return;
+      }
+
       const res =
-        mode === "approve"
-          ? await approveValidation(id, {
-              ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
-              // Plus de signature_data_url
-              ...(isDaf
-                ? {
-                    budget_prevu: !!budgetPrevu,
-                    budget_disponible: !!budgetDisponible,
-                    paiement_immediat: !!paiementImmediat,
-                    daf_critere4: dafCritere4 ? String(dafCritere4).trim() : null,
-                    ...dafExtraPayload, // Envoyer le moyen de paiement comme chaîne
-                  }
-                : {}),
-            })
-          : mode === "reject"
-            ? await rejectValidation(id, { commentaire: commentaireTrimmed })
-            : await returnValidationForModification(id, { commentaire: commentaireTrimmed });
+        mode === "reject"
+          ? await rejectValidation(id, { commentaire: commentaireTrimmed })
+          : await returnValidationForModification(id, { commentaire: commentaireTrimmed });
 
       if (!res?.success) throw new Error(res?.message || "Action échouée");
       emitToast({
         variant: "success",
-        message:
-          mode === "approve"
-            ? "Validation effectuée"
-            : mode === "reject"
-              ? "Demande rejetée"
-              : "Demande retournée pour modification",
+        message: mode === "reject" ? "Demande rejetée" : "Demande retournée pour modification",
       });
       onDone?.();
       close();
@@ -329,6 +421,63 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     }
   };
 
+  const completeSignature = useCallback(async () => {
+    if (!item?.id) return;
+    if (signatureCompleting) return;
+    setSignatureError("");
+
+    try {
+      setSignatureCompleting(true);
+      const res = await completeValidationSignature(item.id);
+      if (!res?.success) throw new Error(res?.message || "Signature non terminee");
+
+      if (item?.id) {
+        void downloadFile(
+          `/validations/${item.id}/signature/download`,
+          `signature_validation_${item.id}.pdf`
+        ).catch(() => {
+          emitToast({
+            variant: "warning",
+            message: "Preuve de signature indisponible.",
+          });
+        });
+      }
+
+      emitToast({ variant: "success", message: "Validation effectuee" });
+      onDone?.();
+      close({ force: true });
+    } catch (err) {
+      const msg = err?.message || "Erreur inconnue";
+      setSignatureError(msg);
+      emitToast({ variant: "error", message: msg });
+    } finally {
+      setSignatureCompleting(false);
+    }
+  }, [item?.id, signatureCompleting, onDone, close]);
+
+  React.useEffect(() => {
+    if (!signatureUrl) return undefined;
+
+    const handler = (event) => {
+      if (event.origin !== "https://app.firma.dev") return;
+      const type = event?.data?.type;
+      if (!type) return;
+      if (type === "signing.completed") {
+        completeSignature();
+        return;
+      }
+      if (type === "signing.declined") {
+        setSignatureError("Signature refusee.");
+      }
+      if (type === "signing.failed") {
+        setSignatureError("Signature echouee.");
+      }
+    };
+
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [signatureUrl, completeSignature]);
+
   if (!open) return null;
 
   return (
@@ -336,24 +485,21 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       isOpen={open}
       onClose={close}
       showCloseButton={false}
-      className="w-full max-w-xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
+      className={`w-full ${isSigning ? "max-w-4xl" : "max-w-xl"} rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800`}
     >
-        <FullscreenLoader show={submitting} label="Traitement..." />
+        <FullscreenLoader
+          show={submitting || signatureCompleting}
+          label={signatureCompleting ? "Validation..." : "Traitement..."}
+        />
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">{title}</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {mode === "approve"
-                ? "Ajouter un commentaire si besoin."
-                : mode === "reject"
-                  ? "Commentaire obligatoire pour le rejet."
-                  : "Commentaire obligatoire (motif du retour)."}
-            </p>
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">{headerTitle}</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{headerSubtitle}</p>
           </div>
 
           <button
             type="button"
-            disabled={submitting}
+            disabled={submitting || signatureCompleting}
             title="Fermer"
             aria-label="Fermer"
             className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
@@ -363,12 +509,71 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
           </button>
         </div>
 
-        {error ? (
+        {errorMessage ? (
           <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
-            {error}
+            {errorMessage}
           </div>
         ) : null}
 
+        {mode === "approve" && isSigning ? (
+          <div className="mt-4 space-y-4">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300">
+              <div>Signer pour valider la demande.</div>
+              {signatureRequestId || signatureUserId ? (
+                <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  Ref: {signatureRequestId || signatureUserId}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="h-[520px] overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
+              <iframe
+                title="Signature Firma"
+                src={signatureUrl}
+                className="h-full w-full"
+                allow="clipboard-read; clipboard-write"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <span>Si la signature ne s'affiche pas, ouvrez dans un nouvel onglet.</span>
+              {signatureUrl ? (
+                <a
+                  href={signatureUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700 dark:border-gray-800 dark:text-gray-200"
+                >
+                  Ouvrir
+                </a>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={close}
+                disabled={submitting || signatureCompleting}
+                title="Annuler"
+                aria-label="Annuler"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <FiX />
+              </button>
+
+              <button
+                type="button"
+                onClick={completeSignature}
+                disabled={signatureCompleting}
+                title="J'ai signe"
+                aria-label="J'ai signe"
+                className="inline-flex items-center justify-center p-2 rounded-lg text-white hover:opacity-90 disabled:opacity-60 bg-gray-900 dark:bg-white dark:text-gray-900"
+              >
+                <FiCheckCircle />
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={onSubmit} className="mt-4 space-y-4">
           {mode === "approve" && isDaf ? (
             <div className="p-4 border border-gray-200 rounded-xl dark:border-gray-800">
@@ -537,30 +742,50 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                           {dafConditions.map((c, idx) => (
                             <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-6">
                               <input
-                                value={c.label}
-                                onChange={(e) => setDafCondition(idx, "label", e.target.value)}
-                                className="sm:col-span-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-                                placeholder={`Tranche ${idx + 1}`}
+                                value={c.label || `Tranche ${idx + 1}`}
+                                readOnly
+                                className="sm:col-span-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-300"
                               />
+                              <select
+                                value={c.mode || "pct"}
+                                onChange={(e) => setDafCondition(idx, "mode", e.target.value)}
+                                className="sm:col-span-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                              >
+                                <option value="pct">%</option>
+                                <option value="amount">Montant</option>
+                              </select>
+                              {c.mode === "amount" ? (
+                                <input
+                                  value={c.montant_prevu}
+                                  onChange={(e) => setDafCondition(idx, "montant_prevu", e.target.value)}
+                                  className="sm:col-span-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                                  placeholder="Montant"
+                                />
+                              ) : (
                               <input
                                 value={c.pourcentage}
                                 onChange={(e) => setDafCondition(idx, "pourcentage", e.target.value)}
                                 className="sm:col-span-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
                                 placeholder="%"
                               />
+                              )}
                               <input
                                 value={c.condition_texte}
                                 onChange={(e) => setDafCondition(idx, "condition_texte", e.target.value)}
-                                className="sm:col-span-3 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                                className="sm:col-span-2 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
                                 placeholder="Condition (optionnel)"
                               />
                               <div className="sm:col-span-6 text-xs text-gray-500 dark:text-gray-400">
-                                Montant prevu:{" "}
-                                {formatAmount(
-                                  Number.isFinite(toNumber(c.pourcentage)) && totalMontant > 0
-                                    ? (totalMontant * Number(c.pourcentage)) / 100
-                                    : null
-                                )}
+                                {c.mode === "amount" ? "Pourcentage" : "Montant prevu"}:{" "}
+                                {c.mode === "amount"
+                                  ? `${Number.isFinite(toNumber(c.montant_prevu)) && totalMontant > 0
+                                      ? ((Number(c.montant_prevu) / totalMontant) * 100).toFixed(2)
+                                      : "-"}%`
+                                  : formatAmount(
+                                      Number.isFinite(toNumber(c.pourcentage)) && totalMontant > 0
+                                        ? (totalMontant * Number(c.pourcentage)) / 100
+                                        : null
+                                    )}
                               </div>
                               <div className="sm:col-span-6 flex justify-end">
                                 <button
@@ -642,6 +867,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
             </button>
           </div>
         </form>
+        )}
     </Modal>
   );
 }
@@ -673,3 +899,5 @@ function YesNo({ label, value, onChange }) {
     </div>
   );
 }
+
+

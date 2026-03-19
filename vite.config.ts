@@ -20,6 +20,7 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: true,
+    allowedHosts: ["desktop-gq4h5gu"],
   },
   preview: {
     host: true,

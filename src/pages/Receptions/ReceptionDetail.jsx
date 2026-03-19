@@ -1,7 +1,15 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { FiArrowLeft, FiCheckCircle, FiDownload, FiEye, FiRefreshCw, FiUpload, FiX } from "react-icons/fi";
-import { getReception, visaDaf, visaDirecteur } from "../../services/receptions.service";
+import {
+  getReception,
+  visaDirecteur,
+  visaDaf,
+  startVisaDirecteurSignature,
+  completeVisaDirecteurSignature,
+  startVisaDafSignature,
+  completeVisaDafSignature,
+} from "../../services/receptions.service";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
@@ -12,6 +20,8 @@ import { Modal } from "../../components/ui/modal";
 import { formatMoney } from "../../utils/formatUtils";
 import { emitToast } from "../../services/toastBus";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
+import FirmaSignatureFrame from "../../components/common/FirmaSignatureFrame";
+import { FIRMA_ENABLED } from "../../utils/firma";
 
 function formatDateTime(iso) {
   if (!iso) return "-";
@@ -29,12 +39,43 @@ function formatPhase(value) {
   return "-";
 }
 
+
+function normalizeRoleName(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function candidateScopesForDemande(demande) {
+  const scopes = ["GLOBAL"];
+  if (!demande) return scopes;
+  if (demande.direction_id) scopes.push(`DIRECTION:${Number(demande.direction_id)}`);
+  if (demande.departement_id) scopes.push(`DEPARTEMENT:${Number(demande.departement_id)}`);
+  if (demande.service_id) scopes.push(`SERVICE:${Number(demande.service_id)}`);
+  return scopes;
+}
+
+function hasDelegationForRole(delegations, roleName, candidateScopes = []) {
+  const target = normalizeRoleName(roleName);
+  if (!target) return false;
+  const list = Array.isArray(delegations) ? delegations : [];
+  if (!list.length) return false;
+  const scopes = Array.isArray(candidateScopes) && candidateScopes.length ? candidateScopes : ["GLOBAL"];
+
+  return list.some((d) => {
+    const role = normalizeRoleName(d?.role_name);
+    if (!role || role !== target) return false;
+    const scopeRaw = d?.scope != null && String(d.scope).trim() !== "" ? String(d.scope).trim() : "GLOBAL";
+    const scope = String(scopeRaw).toUpperCase();
+    if (scope && scope !== "GLOBAL" && !scopes.includes(scope)) return false;
+    return true;
+  });
+}
+
 export default function ReceptionDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
   const { user, hasPermission, hasAnyPermission } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
-  const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
+  const delegations = user?.agent?.delegations || [];
 
   const canListReceptions = hasAnyPermission(["RECEPTION_LIST_SELF", "RECEPTION_LIST_ALL", "RECEPTION_LIST"]);
   const canViewDemandeDetails = hasAnyPermission([
@@ -57,11 +98,13 @@ export default function ReceptionDetail() {
     !!reception?.visa_directeur_id &&
     !!reception?.conforme &&
     Number(reception?.visa_directeur_id) === Number(reception?.recu_par_id);
+  const visaDirecteurDelegated = Boolean(reception?.visa_directeur_delegated);
+  const visaDafDelegated = Boolean(reception?.visa_daf_delegated);
   const visaDirecteurValue = reception?.visa_directeur_id
-    ? `Oui${reception.visa_directeur_nom ? ` (${reception.visa_directeur_nom})` : ""}${visaDirecteurAuto ? " (auto)" : ""}`
+    ? `Oui${reception.visa_directeur_nom ? ` (${reception.visa_directeur_nom})` : ""}${visaDirecteurAuto ? " (auto)" : ""}${visaDirecteurDelegated ? " (Délégué)" : ""}`
     : "Non";
   const visaDafValue = reception?.visa_daf_id
-    ? `Oui${reception.visa_daf_nom ? ` (${reception.visa_daf_nom})` : ""}`
+    ? `Oui${reception.visa_daf_nom ? ` (${reception.visa_daf_nom})` : ""}${visaDafDelegated ? " (Délégué)" : ""}`
     : "Non";
 
   const [docsLoading, setDocsLoading] = useState(false);
@@ -93,6 +136,12 @@ export default function ReceptionDetail() {
   // On n'utilise plus les signatures
   const [visaCommentaire, setVisaCommentaire] = useState("");
   const [visaModalError, setVisaModalError] = useState("");
+  const [signatureUrl, setSignatureUrl] = useState("");
+  const [signatureSessionId, setSignatureSessionId] = useState("");
+  const [signatureRequestId, setSignatureRequestId] = useState("");
+  const [signatureUserId, setSignatureUserId] = useState("");
+  const [signatureCompleting, setSignatureCompleting] = useState(false);
+  const isSigning = FIRMA_ENABLED && Boolean(signatureUrl);
 
   const fetchReception = async () => {
     setLoading(true);
@@ -123,7 +172,14 @@ export default function ReceptionDetail() {
   useEffect(() => { fetchReception(); }, [uuid]);
   useEffect(() => { if (reception?.id) fetchDocs(reception.id); }, [reception?.id]);
 
-  const directorByDelegation = delegatedRoles.includes("DIRECTEUR");
+  const candidateScopes = useMemo(
+    () => candidateScopesForDemande(reception?.demandes_paiement),
+    [reception?.demandes_paiement?.direction_id, reception?.demandes_paiement?.departement_id, reception?.demandes_paiement?.service_id]
+  );
+  const directorByDelegation = useMemo(
+    () => hasDelegationForRole(delegations, "DIRECTEUR", candidateScopes),
+    [delegations, candidateScopes]
+  );
   const demandeDirectionId = reception?.demandes_paiement?.direction_id ?? reception?.demandes_paiement?.directionId;
   const userDirectionId = user?.agent?.direction_id ?? user?.agent?.directionId;
   const isDirectorForDemandeDirection =
@@ -141,32 +197,86 @@ export default function ReceptionDetail() {
     !!reception?.visa_directeur_id &&
     !reception?.visa_daf_id;
 
-  const doVisa = async (kind, commentaire) => {
+  const startVisaSignature = async (kind, commentaire) => {
     if (!reception?.id) return;
     setVisaError("");
     try {
       setVisaLoading(true);
       const commentaireTrimmed = (commentaire || "").trim();
-      const payload = {
-        // Plus de signature_data_url
-        ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
-      };
-      const res = kind === "directeur" ? await visaDirecteur(reception.id, payload) : await visaDaf(reception.id, payload);
-      if (!res?.success) throw new Error(res?.message || "Visa échoué");
+      const payload = commentaireTrimmed ? { commentaire: commentaireTrimmed } : {};
+
+      if (!FIRMA_ENABLED) {
+        const res = kind === "directeur" ? await visaDirecteur(reception.id, payload) : await visaDaf(reception.id, payload);
+        if (!res?.success) throw new Error(res?.message || "Visa impossible");
+        await fetchReception();
+        emitToast({ variant: "success", message: kind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
+        if (kind === "daf") {
+          const targetUuid = res?.data?.uuid || reception?.uuid || uuid;
+          if (targetUuid) {
+            downloadFile(`/receptions/${targetUuid}/pdf`, `reception_${targetUuid}.pdf`);
+          }
+        }
+        closeVisaModal();
+        return;
+      }
+
+      const res =
+        kind === "directeur"
+          ? await startVisaDirecteurSignature(reception.id, payload)
+          : await startVisaDafSignature(reception.id, payload);
+      if (!res?.success) throw new Error(res?.message || "Signature impossible");
+      const data = res?.data || {};
+      const signingUrl = data.signingUrl || data.signing_url;
+      if (!signingUrl) throw new Error("Lien de signature introuvable");
+      setSignatureUrl(signingUrl);
+      setSignatureSessionId(data.sessionId || data.session_id || "");
+      setSignatureRequestId(data.signingRequestId || data.signing_request_id || "");
+      setSignatureUserId(data.signingRequestUserId || data.signing_request_user_id || "");
+      setVisaModalError("");
+    } catch (e) {
+      const msg = e?.message || "Erreur signature";
+      setVisaModalError(msg);
+      emitToast({ variant: "error", message: msg });
+    } finally {
+      setVisaLoading(false);
+    }
+  };
+
+  const completeVisaSignature = async () => {
+    if (!signatureSessionId || !visaKind) return;
+    if (signatureCompleting) return;
+    setVisaModalError("");
+    try {
+      setSignatureCompleting(true);
+      const res =
+        visaKind === "directeur"
+          ? await completeVisaDirecteurSignature(reception.id, signatureSessionId)
+          : await completeVisaDafSignature(reception.id, signatureSessionId);
+      if (!res?.success) throw new Error(res?.message || "Signature non terminee");
+
+      if (signatureSessionId) {
+        const base = reception?.uuid || uuid || signatureSessionId;
+        const filename = `signature_visa_${visaKind}_${base}.pdf`;
+        void downloadFile(`/signatures/sessions/${signatureSessionId}/download`, filename).catch(() => {
+          emitToast({ variant: "warning", message: "Preuve de signature indisponible." });
+        });
+      }
+
       await fetchReception();
-      emitToast({ variant: "success", message: kind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
-      if (kind === "daf") {
+      emitToast({ variant: "success", message: visaKind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
+      if (visaKind === "daf") {
         const targetUuid = res?.data?.uuid || reception?.uuid || uuid;
         if (targetUuid) {
           downloadFile(`/receptions/${targetUuid}/pdf`, `reception_${targetUuid}.pdf`);
         }
       }
+      closeVisaModal();
     } catch (e) {
       const msg = e?.message || "Erreur visa";
-      setVisaError(msg);
+      setVisaModalError(msg);
       emitToast({ variant: "error", message: msg });
     } finally {
-      setVisaLoading(false);
+      setSignatureCompleting(false);
     }
   };
 
@@ -174,23 +284,32 @@ export default function ReceptionDetail() {
     setVisaModalError("");
     setVisaKind(kind);
     setVisaCommentaire("");
+    setSignatureUrl("");
+    setSignatureSessionId("");
+    setSignatureRequestId("");
+    setSignatureUserId("");
+    setSignatureCompleting(false);
     setVisaModalOpen(true);
   };
 
   const closeVisaModal = () => {
-    if (visaLoading) return;
+    if (visaLoading || signatureCompleting) return;
     setVisaModalOpen(false);
     setVisaKind(null);
     setVisaCommentaire("");
     setVisaModalError("");
+    setSignatureUrl("");
+    setSignatureSessionId("");
+    setSignatureRequestId("");
+    setSignatureUserId("");
+    setSignatureCompleting(false);
   };
 
   const confirmVisa = async () => {
     setVisaModalError("");
     try {
       if (!visaKind) throw new Error("Type de visa invalide");
-      await doVisa(visaKind, visaCommentaire);
-      closeVisaModal();
+      await startVisaSignature(visaKind, visaCommentaire);
     } catch (e) {
       setVisaModalError(e?.message || "Erreur visa");
     }
@@ -248,11 +367,16 @@ export default function ReceptionDetail() {
   return (
     <div className="space-y-4">
       <FullscreenLoader
-        show={loading || visaLoading}
-        label={visaLoading ? "Traitement..." : "Chargement de la réception..."}
+        show={loading || visaLoading || signatureCompleting}
+        label={signatureCompleting ? "Signature..." : visaLoading ? "Traitement..." : "Chargement de la réception..."}
       />
 
-      <Modal isOpen={visaModalOpen} onClose={closeVisaModal} className="max-w-2xl p-6" showCloseButton={!visaLoading}>
+      <Modal
+        isOpen={visaModalOpen}
+        onClose={closeVisaModal}
+        className={`${isSigning ? "max-w-4xl" : "max-w-2xl"} p-6`}
+        showCloseButton={!visaLoading && !signatureCompleting}
+      >
         <div className="text-lg font-semibold text-gray-800 dark:text-white/90">
           {visaKind === "directeur" ? "Visa Directeur" : visaKind === "daf" ? "Visa DAF" : "Visa"}
         </div>
@@ -264,40 +388,54 @@ export default function ReceptionDetail() {
           </div>
         ) : null}
 
-
-        <div className="mt-4">
-          <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire (optionnel)</div>
-          <textarea
-            value={visaCommentaire}
-            onChange={(e) => setVisaCommentaire(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-            placeholder="Optionnel"
+        {isSigning ? (
+          <FirmaSignatureFrame
+            signingUrl={signatureUrl}
+            signatureRequestId={signatureRequestId}
+            signatureUserId={signatureUserId}
+            onCancel={closeVisaModal}
+            onComplete={completeVisaSignature}
+            onError={setVisaModalError}
+            busy={signatureCompleting}
+            title={visaKind === "daf" ? "Signer pour visa DAF." : "Signer pour visa Directeur."}
           />
-        </div>
+        ) : (
+          <>
+            <div className="mt-4">
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire (optionnel)</div>
+              <textarea
+                value={visaCommentaire}
+                onChange={(e) => setVisaCommentaire(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                placeholder="Optionnel"
+              />
+            </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            disabled={visaLoading}
-            onClick={closeVisaModal}
-            title="Annuler"
-            aria-label="Annuler"
-            className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
-          >
-            <FiX />
-          </button>
-          <button
-            type="button"
-            disabled={visaLoading}
-            onClick={confirmVisa}
-            title={visaLoading ? "Validation..." : "Valider"}
-            aria-label={visaLoading ? "Validation..." : "Valider"}
-            className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
-          >
-            <FiCheckCircle />
-          </button>
-        </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={visaLoading || signatureCompleting}
+                onClick={closeVisaModal}
+                title="Annuler"
+                aria-label="Annuler"
+                className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <FiX />
+              </button>
+              <button
+                type="button"
+                disabled={visaLoading || signatureCompleting}
+                onClick={confirmVisa}
+                title={visaLoading ? "Validation..." : "Valider"}
+                aria-label={visaLoading ? "Validation..." : "Valider"}
+                className="inline-flex items-center justify-center p-2 rounded-lg bg-gray-900 text-white hover:opacity-90 disabled:opacity-60 dark:bg-white dark:text-gray-900"
+              >
+                <FiCheckCircle />
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
 
       {error ? (
@@ -579,3 +717,8 @@ function Info({ label, value }) {
     </div>
   );
 }
+
+
+
+
+

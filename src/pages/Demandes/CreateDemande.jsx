@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+﻿import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { createDemande } from "../../services/demandes.services";
 import { emitToast } from "../../services/toastBus";
@@ -278,31 +278,30 @@ export default function CreateDemande() {
       };
 
       const res = await createDemande(payload);
-      if (res?.success) {
-        if (uploadFiles.length) {
-          try {
-            setUploadingDocs(true);
-            const typeDoc =
-              uploadType === "autre"
-                ? `autre:${String(uploadTypeAutre || "").trim()}`
-                : uploadType;
-            await uploadManyDocuments({
-              files: uploadFiles,
-              demande_id: res.data?.id,
-              type_document: typeDoc,
-            });
-          } catch (e) {
-            emitToast(e?.message || "Upload des documents échoué", "error");
-          } finally {
-            setUploadingDocs(false);
-          }
-        }
+      if (!res?.success) throw new Error(res?.message || "Erreur creation demande");
 
-        emitToast("Demande créée avec succès", "success");
-        nav("/demandes/my");
-      } else {
-        throw new Error(res?.message || "Erreur création demande");
+      const demande = res?.data;
+      if (uploadFiles.length && demande?.id) {
+        try {
+          setUploadingDocs(true);
+          const typeDoc =
+            uploadType === "autre"
+              ? `autre:${String(uploadTypeAutre || "").trim()}`
+              : uploadType;
+          await uploadManyDocuments({
+            files: uploadFiles,
+            demande_id: demande.id,
+            type_document: typeDoc,
+          });
+        } catch (e) {
+          emitToast(e?.message || "Upload des documents echoue", "error");
+        } finally {
+          setUploadingDocs(false);
+        }
       }
+
+      emitToast("Demande creee avec succes", "success");
+      nav("/demandes/my");
     } catch (err) {
       emitToast(err?.message || "Erreur inconnue", "error");
     } finally {
@@ -312,7 +311,10 @@ export default function CreateDemande() {
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
-      <FullscreenLoader show={loading || uploadingDocs} label="Traitement..." />
+      <FullscreenLoader
+        show={loading || uploadingDocs}
+        label="Traitement..."
+      />
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">Créer une demande</h1>
         <p className="text-gray-600 dark:text-gray-400">Remplissez les détails de votre demande.</p>

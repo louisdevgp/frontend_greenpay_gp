@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { createReception } from "../../services/receptions.service";
+import { createReception, startReceptionSignature, completeReceptionSignature } from "../../services/receptions.service";
 import { uploadManyDocuments } from "../../services/documents.service";
 import { Modal } from "../../components/ui/modal";
 import DatePicker from "../../components/form/date-picker";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
+import FirmaSignatureFrame from "../../components/common/FirmaSignatureFrame";
+import { FIRMA_ENABLED } from "../../utils/firma";
 import { emitToast } from "../../services/toastBus";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
+import { downloadFile } from "../../utils/downloadFile";
 
 export default function CreateReceptionModal({ open, paiement, demande, onClose, onCreated }) {
     const [submitting, setSubmitting] = useState(false);
@@ -31,12 +34,25 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
     });
 
     const [docsTypeAutre, setDocsTypeAutre] = useState("");
+    const [signatureUrl, setSignatureUrl] = useState("");
+    const [signatureSessionId, setSignatureSessionId] = useState("");
+    const [signatureRequestId, setSignatureRequestId] = useState("");
+    const [signatureUserId, setSignatureUserId] = useState("");
+    const [signatureError, setSignatureError] = useState("");
+    const [signatureCompleting, setSignatureCompleting] = useState(false);
+    const isSigning = FIRMA_ENABLED && Boolean(signatureUrl);
 
     useEffect(() => {
         if (!open) return;
         const defaultPhase = canAfter ?"APRES_PAIEMENT" : "AVANT_PAIEMENT";
         setSubmitting(false);
         setError("");
+        setSignatureUrl("");
+        setSignatureSessionId("");
+        setSignatureRequestId("");
+        setSignatureUserId("");
+        setSignatureError("");
+        setSignatureCompleting(false);
         setForm({
             phase: defaultPhase,
             date_reception: new Date().toISOString().slice(0, 10),
@@ -52,7 +68,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
     const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
     const close = () => {
-        if (submitting) return;
+        if (submitting || signatureCompleting) return;
         onClose?.();
     };
 
@@ -80,6 +96,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
     const onSubmit = async (e) => {
         e.preventDefault();
         setError("");
+        setSignatureError("");
 
         const msg = validate();
         if (msg) {
@@ -101,27 +118,27 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                 observations: form.observations?.trim() || null,
             };
 
-            const res = await createReception(payload);
-            if (!res?.success) throw new Error(res?.message || "Création réception échouée");
-
-            const receptionId = res?.data?.id;
-            if (form.require_docs && docs.files?.length && receptionId) {
-                const typeDocumentToSend =
-                    String(docs.type_document).toLowerCase() === "autre"
-                        ?`autre:${docsTypeAutre.trim()}`
-                        : docs.type_document;
-
-                await uploadManyDocuments({
-                    files: docs.files,
-                    type_document: typeDocumentToSend,
-                    reception_id: receptionId,
-                });
+            if (!FIRMA_ENABLED) {
+                const res = await createReception(payload);
+                if (!res?.success) throw new Error(res?.message || "Creation reception impossible");
+                emitToast({ variant: "success", message: "Reception creee avec succes" });
+                onCreated?.(res?.data);
+                close();
+                return;
             }
 
-            emitToast({ variant: "success", message: "Réception créée" });
-            setSubmitting(false);
-            onCreated?.();
-            close();
+            const res = await startReceptionSignature(payload);
+            if (!res?.success) throw new Error(res?.message || "Signature impossible");
+            const data = res?.data || {};
+            const signingUrl = data.signingUrl || data.signing_url;
+            if (!signingUrl) throw new Error("Lien de signature introuvable");
+            setSignatureUrl(signingUrl);
+            setSignatureSessionId(data.sessionId || data.session_id || "");
+            setSignatureRequestId(data.signingRequestId || data.signing_request_id || "");
+            setSignatureUserId(data.signingRequestUserId || data.signing_request_user_id || "");
+            setSignatureError("");
+            return;
+
         } catch (err) {
             const msg = err?.message || "Erreur inconnue";
             setError(msg);
@@ -129,6 +146,51 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
             setSubmitting(false);
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    const completeSignature = async () => {
+        if (!signatureSessionId) return;
+        if (signatureCompleting) return;
+        setSignatureError("");
+
+        try {
+            setSignatureCompleting(true);
+            const res = await completeReceptionSignature(signatureSessionId);
+            if (!res?.success) throw new Error(res?.message || "Signature non terminee");
+
+            const reception = res?.data;
+            if (signatureSessionId) {
+                const filename = reception?.uuid
+                    ? `signature_reception_${reception.uuid}.pdf`
+                    : `signature_reception_${signatureSessionId}.pdf`;
+                void downloadFile(`/signatures/sessions/${signatureSessionId}/download`, filename).catch(() => {
+                    emitToast({ variant: "warning", message: "Preuve de signature indisponible." });
+                });
+            }
+            if (form.require_docs && docs.files?.length && reception?.id) {
+                const typeDocumentToSend =
+                    String(docs.type_document).toLowerCase() === "autre"
+                        ? `autre:${docsTypeAutre.trim()}`
+                        : docs.type_document;
+
+                await uploadManyDocuments({
+                    files: docs.files,
+                    type_document: typeDocumentToSend,
+                    reception_id: reception.id,
+                });
+            }
+
+            emitToast({ variant: "success", message: "Reception creee" });
+            setSubmitting(false);
+            onCreated?.();
+            close();
+        } catch (err) {
+            const msg = err?.message || "Erreur inconnue";
+            setSignatureError(msg);
+            emitToast({ variant: "error", message: msg });
+        } finally {
+            setSignatureCompleting(false);
         }
     };
 
@@ -157,9 +219,12 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
             isOpen={open}
             onClose={close}
             showCloseButton={false}
-            className="w-full max-w-3xl rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800"
+            className={`w-full ${isSigning ? "max-w-4xl" : "max-w-3xl"} rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800`}
         >
-            <FullscreenLoader show={submitting} label="Traitement..." />
+            <FullscreenLoader
+                show={submitting || signatureCompleting}
+                label={signatureCompleting ? "Signature..." : "Traitement..."}
+            />
                 <div className="flex items-start justify-between gap-3">
                     <div>
                         <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Nouvelle réception</h2>
@@ -171,10 +236,21 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                             )}
                         </p>
                     </div>
-                    <button type="button" onClick={close} className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
+                    <button
+                        type="button"
+                        onClick={close}
+                        disabled={submitting || signatureCompleting}
+                        className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
                         Fermer
                     </button>
                 </div>
+
+                {signatureError ? (
+                    <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                        {signatureError}
+                    </div>
+                ) : null}
 
                 {error ?(
                     <div className="px-4 py-3 mt-4 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
@@ -182,6 +258,18 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                     </div>
                 ) : null}
 
+                {isSigning ? (
+                    <FirmaSignatureFrame
+                        signingUrl={signatureUrl}
+                        signatureRequestId={signatureRequestId}
+                        signatureUserId={signatureUserId}
+                        onCancel={close}
+                        onComplete={completeSignature}
+                        onError={setSignatureError}
+                        busy={signatureCompleting}
+                        title="Signer pour creer la reception."
+                    />
+                ) : (
                 <form noValidate onSubmit={onSubmit} className="mt-4 space-y-4">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <Field label="Phase">
@@ -323,6 +411,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
                         </button>
                     </div>
                 </form>
+                )}
         </Modal>
     );
 }

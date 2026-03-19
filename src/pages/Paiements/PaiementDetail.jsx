@@ -74,6 +74,9 @@ export default function PaiementDetail() {
     "VALIDATION_LIST_PENDING",
     "VALIDATION_LIST_DONE",
   ]);
+  const comptableLabel = paiement?.comptable_nom
+    ? `${paiement.comptable_nom}${paiement.paiement_delegated ? " (Délégué)" : ""}`
+    : "-";
 
   return (
     <div className="space-y-4">
@@ -146,6 +149,7 @@ export default function PaiementDetail() {
             <Info label="Montant" value={`${formatMoney(paiement.montant)} FCFA`} />
             <Info label="Moyen de paiement" value={paiement.moyen_paiement || "-"} />
             <Info label="Bénéficiaire" value={paiement.beneficiaire} />
+            <Info label="Comptable" value={comptableLabel} />
             <Info label="Créé" value={formatDateTime(paiement.created_at)} />
             <Info label="Demande" value={paiement.demandes_paiement?.uuid || "-"} />
           </div>

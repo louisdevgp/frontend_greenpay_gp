@@ -463,9 +463,16 @@ export default function ReceptionsList({ mode = "all" }) {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {reception.visa_directeur_id ? (
-                          <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
-                            Oui
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
+                              Oui
+                            </span>
+                            {reception.visa_directeur_delegated ? (
+                              <span className="px-2 py-1 text-[10px] rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200">
+                                Délégué
+                              </span>
+                            ) : null}
+                          </div>
                         ) : (
                           <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
                             Non
@@ -474,9 +481,16 @@ export default function ReceptionsList({ mode = "all" }) {
                       </td>
                       <td className="px-4 py-3 text-sm">
                         {reception.visa_daf_id ? (
-                          <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
-                            Oui
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">
+                              Oui
+                            </span>
+                            {reception.visa_daf_delegated ? (
+                              <span className="px-2 py-1 text-[10px] rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200">
+                                Délégué
+                              </span>
+                            ) : null}
+                          </div>
                         ) : (
                           <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
                             Non

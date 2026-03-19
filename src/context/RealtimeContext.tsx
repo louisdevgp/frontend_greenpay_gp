@@ -17,6 +17,7 @@ type RealtimeContextValue = {
   notifications: NotificationItem[];
   unreadCount: number;
   pendingValidationsCount: number;
+  validationsTick: number;
   pendingPaiementsCount: number;
   pendingReceptionsCount: number;
   paiementsTick: number;
@@ -58,6 +59,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [pendingValidationsCount, setPendingValidationsCount] = useState(0);
+  const [validationsTick, setValidationsTick] = useState(0);
   const [pendingPaiementsCount, setPendingPaiementsCount] = useState(0);
   const [pendingReceptionsCount, setPendingReceptionsCount] = useState(0);
   const [paiementsTick, setPaiementsTick] = useState(0);
@@ -108,6 +110,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       setConnected(false);
       setNotifications([]);
       setPendingValidationsCount(0);
+      setValidationsTick(0);
       setPendingPaiementsCount(0);
       setPendingReceptionsCount(0);
       setPaiementsTick(0);
@@ -149,6 +152,17 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       }
       if (
         [
+          "validation_pending",
+          "validation_step_approved",
+          "validation_rejected",
+          "validation_returned",
+          "validation_cancelled",
+        ].includes(type)
+      ) {
+        setValidationsTick((t) => t + 1);
+      }
+      if (
+        [
           "reception_creee",
           "reception_updated",
           "reception_deleted",
@@ -179,10 +193,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const handlePendingStatus = (payload: { count?: number; hasPending?: boolean }) => {
       if (typeof payload?.count === "number") {
         setPendingValidationsCount(payload.count);
+        setValidationsTick((t) => t + 1);
         return;
       }
       if (typeof payload?.hasPending === "boolean") {
         setPendingValidationsCount(payload.hasPending ? 1 : 0);
+        setValidationsTick((t) => t + 1);
       }
     };
 
@@ -233,6 +249,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       notifications,
       unreadCount,
       pendingValidationsCount,
+      validationsTick,
       pendingPaiementsCount,
       pendingReceptionsCount,
       paiementsTick,
@@ -246,6 +263,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       notifications,
       unreadCount,
       pendingValidationsCount,
+      validationsTick,
       pendingPaiementsCount,
       pendingReceptionsCount,
       paiementsTick,

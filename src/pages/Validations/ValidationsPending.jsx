@@ -10,6 +10,7 @@ import { labelValidationStepStatus } from "../../utils/statusLabels";
 import { agentDisplayName } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
+import { useRealtime } from "../../context/RealtimeContext.tsx";
 
 const STORAGE_KEY = "filters:validations:pending";
 
@@ -25,6 +26,7 @@ const initialState = {
 };
 
 export default function ValidationsPending() {
+  const { validationsTick } = useRealtime();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState([]);
@@ -55,6 +57,9 @@ export default function ValidationsPending() {
   useEffect(() => {
     fetch();
   }, []);
+  useEffect(() => {
+    if (validationsTick > 0) fetch();
+  }, [validationsTick]);
 
   useEffect(() => {
     if (state.filters.statut || state.filters.beneficiaire) {

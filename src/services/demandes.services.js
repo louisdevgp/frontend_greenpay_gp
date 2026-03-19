@@ -29,6 +29,16 @@ export async function createDemande(payload) {
   return res.data;
 }
 
+export async function startDemandeSignature(payload) {
+  const res = await api.post("/demandes/signature/start", payload);
+  return res.data;
+}
+
+export async function completeDemandeSignature(sessionId) {
+  const res = await api.post("/demandes/signature/complete", { session_id: sessionId });
+  return res.data;
+}
+
 // Update demande
 export async function updateDemande(uuid, payload) {
   const res = await api.put(`/demandes/${uuid}`, payload);

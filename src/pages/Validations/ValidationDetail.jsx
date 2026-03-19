@@ -7,7 +7,7 @@ import LoadingButton from "../../components/common/LoadingButton";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
-import { agentDisplayName, validationActorLabel } from "../../utils/validationActors";
+import { agentDisplayName, validationActorLabel, isDelegatedValidation } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 
 function pickDemande(v) {
@@ -18,11 +18,13 @@ function ActorLabel({ validation }) {
   const actor = validationActorLabel(validation);
   const primary = actor?.primary || "-";
   const secondary = actor?.secondary;
+  const delegated = isDelegatedValidation(validation);
 
   return (
     <div>
       <div>{primary}</div>
       {secondary ? <div className="text-xs text-gray-500 dark:text-gray-400">{secondary}</div> : null}
+      {delegated ? <div className="text-[11px] text-emerald-600 dark:text-emerald-300">Délégué</div> : null}
     </div>
   );
 }

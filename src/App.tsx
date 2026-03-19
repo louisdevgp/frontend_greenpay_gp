@@ -47,6 +47,7 @@ import ValidationsPending from "./pages/Validations/ValidationsPending";
 import ValidationDetail from "./pages/Validations/ValidationDetail";
 import ReceptionsList from "./pages/Receptions/ReceptionsList";
 import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
+import SignatureTest from "./pages/Tests/SignatureTest";
 
 // admin
 import PeopleAdmin from "./pages/Admin/PeopleAdmin";
@@ -139,6 +140,11 @@ export default function App() {
               <Route element={<PermissionGuard allow={["VALIDATION_GET"]} />}>
                 <Route path="/validations/:uuid" element={<ValidationDetail />} />
                 <Route path="/validations/uuid/:uuid" element={<ValidationDetail />} />
+              </Route>
+
+              {/* Tests */}
+              <Route element={<PermissionGuard allow={["VALIDATION_APPROVE", "DEMANDE_CREATE"]} />}>
+                <Route path="/tests/signature" element={<SignatureTest />} />
               </Route>
 
               {/* Delegations (non-admin autorise, mais controle cote API) */}

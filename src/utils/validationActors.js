@@ -44,3 +44,9 @@ export function validationActorLabel(step, { currentAgentId } = {}) {
   if (validatorId != null) return { primary: validatorName, secondary: null };
   return { primary: "-", secondary: null };
 }
+
+export function isDelegatedValidation(step) {
+  const validatorId = step?.validator_id != null ? Number(step.validator_id) : null;
+  const validatedById = step?.validated_by_id != null ? Number(step.validated_by_id) : null;
+  return validatedById != null && validatorId != null && validatedById !== validatorId;
+}

@@ -9,12 +9,13 @@ import { loadPersistedState, savePersistedState, clearPersistedState } from "../
 import { labelValidationStepStatus } from "../../utils/statusLabels";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import { useAuth } from "../../context/AuthContext";
-import { validationActorLabel } from "../../utils/validationActors";
+import { validationActorLabel, isDelegatedValidation } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { emitToast } from "../../services/toastBus";
 import ConfirmActionModal from "../../components/common/ConfirmActionModal";
 import ExportButton from "../../components/common/ExportButton";
 import { exportRowsToExcel } from "../../utils/excelExport";
+import { useRealtime } from "../../context/RealtimeContext.tsx";
 
 const STORAGE_KEY = "filters:validations:done";
 
@@ -35,11 +36,13 @@ function ActorLabel({ validation }) {
   const primaryRaw = actor?.primary || "-";
   const primary = primaryRaw && primaryRaw !== "-" ? primaryRaw : "Moi";
   const secondary = actor?.secondary;
+  const delegated = isDelegatedValidation(validation);
 
   return (
     <div>
       <div>{primary}</div>
       {secondary ? <div className="text-xs text-gray-500 dark:text-gray-400">{secondary}</div> : null}
+      {delegated ? <div className="text-[11px] text-emerald-600 dark:text-emerald-300">Délégué</div> : null}
     </div>
   );
 }
@@ -52,6 +55,7 @@ const initialState = {
 
 export default function ValidationsDone() {
   const { hasPermission } = useAuth();
+  const { validationsTick } = useRealtime();
   const canCancel = hasPermission("VALIDATION_CANCEL");
 
   const [loading, setLoading] = useState(true);
@@ -96,6 +100,9 @@ export default function ValidationsDone() {
   useEffect(() => {
     fetch();
   }, [state.page, state.pageSize, state.filters]);
+  useEffect(() => {
+    if (validationsTick > 0) fetch();
+  }, [validationsTick]);
 
   useEffect(() => {
     if (state.filters.statut || state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {
@@ -348,11 +355,7 @@ export default function ValidationsDone() {
                           : statusKey === "annulee" || statusKey === "annule"
                             ? "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
                             : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
-                  const canCancelRow =
-                    !isPaidDemande &&
-                    canCancel &&
-                    (validation?.can_cancel === true ||
-                      (validation?.can_cancel == null && statusKey === "valide"));
+                  const canCancelRow = !isPaidDemande && canCancel && validation?.can_cancel === true;
                   const rowKey =
                     validation?.audit_id ?? validation?.id ?? validation?.uuid ?? `${validation?.step_id ?? "row"}-${index}`;
                   return (
