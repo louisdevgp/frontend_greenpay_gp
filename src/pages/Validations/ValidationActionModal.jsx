@@ -448,6 +448,16 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       const res = await completeValidationSignature(item.id);
       if (!res?.success) throw new Error(res?.message || "Signature non terminee");
 
+      void downloadFile(
+        `/validations/${item.id}/signature/download`,
+        `signature_validation_${item.id}.pdf`
+      ).catch(() => {
+        emitToast({
+          variant: "warning",
+          message: "Preuve de signature indisponible.",
+        });
+      });
+
       emitToast({ variant: "success", message: "Validation effectuee" });
       onDone?.();
       close({ force: true });
