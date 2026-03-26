@@ -269,11 +269,19 @@ export default function DemandesAllList() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
             >
               <option value="">Tous</option>
-              <option value="draft">Brouillon</option>
-              <option value="approuvee">Approuvée</option>
-              <option value="rejete">Rejetée</option>
               <option value="a_modifier">À modifier</option>
-              <option value="en_cours_validation">En cours de validation</option>
+              <option value="soumise">Soumise</option>
+              <option value="validation_responsable">Validation Responsable</option>
+              <option value="validation_directeur">Validation Directeur</option>
+              <option value="validation_daf">Validation DAF</option>
+              <option value="validation_dga">Validation DGA</option>
+              <option value="validation_dg">Validation DG</option>
+              <option value="approuvee">Approuvée</option>
+              <option value="en_attente_paiement">En attente de paiement</option>
+              <option value="paye">Payée</option>
+              <option value="receptionnee">Réceptionnée</option>
+              <option value="cloture">Clôturée</option>
+              <option value="rejete">Rejetée</option>
             </select>
           </div>
 

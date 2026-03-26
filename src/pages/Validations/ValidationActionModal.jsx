@@ -82,6 +82,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [budgetPrevu, setBudgetPrevu] = useState(null); // null | boolean
   const [budgetDisponible, setBudgetDisponible] = useState(null); // null | boolean
   const [paiementImmediat, setPaiementImmediat] = useState(null); // null | boolean
+  const [validationOci, setValidationOci] = useState(null); // null | boolean
   const [dafCritere4, setDafCritere4] = useState(""); // string (moyen de paiement)
   const [validationStopRole, setValidationStopRole] = useState("DG"); // DAF | DGA | DG
   const [dafConditionsChoice, setDafConditionsChoice] = useState("daf"); // "daf" | "demandeur"
@@ -165,6 +166,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetPrevu(null);
     setBudgetDisponible(null);
     setPaiementImmediat(null);
+    setValidationOci(null);
     setDafCritere4("");
     setValidationStopRole("DG");
     setDafConditionsChoice("daf");
@@ -186,6 +188,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetPrevu(demande?.budget_prevu === true ? true : demande?.budget_prevu === false ? false : null);
     setBudgetDisponible(demande?.budget_disponible === true ? true : demande?.budget_disponible === false ? false : null);
     setPaiementImmediat(demande?.paiement_immediat === true ? true : demande?.paiement_immediat === false ? false : null);
+    setValidationOci(demande?.validation_oci === true ? true : demande?.validation_oci === false ? false : null);
     setDafCritere4(normalizeDafCritere4Input(demande?.daf_critere4));
     setValidationStopRole(normalizeValidationStopRole(demande?.validation_stop_role) || "DG");
     if (dafExisting.length > 0) {
@@ -215,6 +218,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     demande?.budget_prevu,
     demande?.budget_disponible,
     demande?.paiement_immediat,
+    demande?.validation_oci,
     demande?.daf_critere4,
     demande?.validation_stop_role,
     dafExisting,
@@ -296,12 +300,24 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
 
       let dafExtraPayload = {};
       if (mode === "approve" && isDaf) {
-        if (budgetPrevu === null || budgetDisponible === null || paiementImmediat === null || !dafCritere4) {
-          throw new Error("Controle DAF: renseigne Budget prevu, Budget disponible, Paiement immediat et Moyen de paiement");
+        if (
+          budgetPrevu === null ||
+          budgetDisponible === null ||
+          paiementImmediat === null ||
+          validationOci === null ||
+          !dafCritere4
+        ) {
+          throw new Error(
+            "Controle DAF: renseigne Budget prevu, Budget disponible, Paiement immediat, Validé par OCI et Moyen de paiement"
+          );
         }
 
         const stopRoleNormalized = normalizeValidationStopRole(validationStopRole);
         if (!stopRoleNormalized) throw new Error("Categorie de validation invalide");
+
+        if (validationOci === false && !commentaireTrimmed) {
+          throw new Error("Commentaire obligatoire si Validation OCI = Non");
+        }
 
         if (paiementImmediat === false) {
           if (!commentaireTrimmed) throw new Error("Commentaire obligatoire si paiement non immediat");
@@ -373,6 +389,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                 budget_prevu: !!budgetPrevu,
                 budget_disponible: !!budgetDisponible,
                 paiement_immediat: !!paiementImmediat,
+                validation_oci: !!validationOci,
                 daf_critere4: dafCritere4 ? String(dafCritere4).trim() : null,
                 ...dafExtraPayload, // Envoyer le moyen de paiement comme chaîne
               }
@@ -588,6 +605,11 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                   label="Budget disponible ?"
                   value={budgetDisponible}
                   onChange={setBudgetDisponible}
+                />
+                <YesNo
+                  label="Validé par OCI ?"
+                  value={validationOci}
+                  onChange={setValidationOci}
                 />
                 <YesNo
                   label="Paiement immédiat ?"

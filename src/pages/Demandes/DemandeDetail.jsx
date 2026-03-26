@@ -820,6 +820,11 @@ export default function DemandeDetail() {
                 { label: "Devise", value: demande.devise || "FCFA" },
                 { label: "Bénéficiaire", value: demande.beneficiaire || "-" },
                 { label: "Observations", value: demande.remarque || "-" },
+                {
+                  label: "Validé par OCI",
+                  value:
+                    demande.validation_oci === true ? "Oui" : demande.validation_oci === false ? "Non" : "-",
+                },
                 { label: "Paiement immédiat", value: demande.paiement_immediat ? "Oui" : "Non" },
                 { label: "Budget prévu", value: demande.budget_prevu ? "Oui" : "Non" },
                 { label: "Budget dispo", value: demande.budget_disponible ? "Oui" : "Non" },
