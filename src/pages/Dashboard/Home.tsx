@@ -13,10 +13,13 @@ type ByStatutRow = { statut: string; count?: number; montant?: number };
 type ByProfilRow = { role: string; count?: number; montant?: number };
 type ByMoyenRow = { moyen_paiement?: string; moyen?: string; count?: number; montant?: number };
 type TopBeneficiaireRow = { beneficiaire?: string; count?: number; montant?: number };
+type DirectionItem = { id: number; nom: string };
 
 type DashboardData = {
   period?: { from?: string; to?: string };
   role?: string;
+  direction?: DirectionItem | null;
+  directions?: DirectionItem[] | null;
   global?: {
     demandes?: MoneyCount;
     validationsPending?: MoneyCount;
@@ -43,6 +46,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState<DashboardData | null>(null);
+  const [directionId, setDirectionId] = useState("");
 
   const [month, setMonth] = useState(() => {
     const now = new Date();
@@ -71,11 +75,13 @@ export default function Home() {
     };
   };
 
-  const fetchData = async (yyyyMm = month) => {
+  const fetchData = async (yyyyMm = month, dirId = directionId) => {
     setLoading(true);
     setError("");
     try {
-      const res = await getDashboardStats(buildPeriodParams(yyyyMm));
+      const params = { ...buildPeriodParams(yyyyMm) } as Record<string, unknown>;
+      if (dirId) params.direction_id = dirId;
+      const res = await getDashboardStats(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement dashboard");
       setData((res.data || null) as DashboardData | null);
     } catch (e: unknown) {
@@ -86,9 +92,9 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchData(month);
+    fetchData(month, directionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, [month, directionId]);
 
   const periodLabel = useMemo(() => {
     const fromIso = data?.period?.from;
@@ -99,6 +105,12 @@ export default function Home() {
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return "";
     return `${from.toLocaleDateString("fr-FR")} → ${to.toLocaleDateString("fr-FR")}`;
   }, [data?.period?.from, data?.period?.to]);
+
+  const directionBadge = useMemo(() => {
+    if (data?.direction?.nom) return `Direction: ${data.direction.nom}`;
+    if (Array.isArray(data?.directions)) return "Direction: Toutes";
+    return "";
+  }, [data?.direction?.nom, data?.directions]);
 
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 
@@ -283,6 +295,11 @@ export default function Home() {
                 <span className="rounded-full border border-gray-200 bg-white/80 px-3 py-1 font-medium dark:border-gray-800 dark:bg-gray-900/70">
                   {periodLabel ? `Période: ${periodLabel}` : "Période: mois en cours"}
                 </span>
+                {directionBadge ? (
+                  <span className="rounded-full border border-gray-200 bg-white/80 px-3 py-1 font-medium dark:border-gray-800 dark:bg-gray-900/70">
+                    {directionBadge}
+                  </span>
+                ) : null}
                 {data?.role ? (
                   <span className="rounded-full bg-gray-900 px-3 py-1 font-medium text-white dark:bg-white/10 dark:text-white/80">
                     Profil: {data.role}
@@ -292,6 +309,28 @@ export default function Home() {
             </div>
 
             <div className="flex items-end gap-3">
+              {Array.isArray(data?.directions) && data.directions.length ? (
+                <div className="relative z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                  <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                    Direction
+                  </label>
+                  <div className="mt-2 w-[200px] sm:w-[220px]">
+                    <select
+                      id="dashboard-direction"
+                      className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-brand-400"
+                      value={directionId}
+                      onChange={(event) => setDirectionId(event.target.value)}
+                    >
+                      <option value="">Toutes directions</option>
+                      {data.directions.map((d) => (
+                        <option key={d.id} value={String(d.id)}>
+                          {d.nom}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : null}
               <div className="relative z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
                 <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
                   Mois
