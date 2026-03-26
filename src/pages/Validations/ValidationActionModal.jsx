@@ -89,6 +89,21 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [dafConditionsMode, setDafConditionsMode] = useState("100/100"); // 100/100 | 70/30 | 50/50 | custom
   const [dafConditions, setDafConditions] = useState([makeDafCondition(0)]);
 
+  const commentaireRequired =
+    mode === "reject" ||
+    mode === "return" ||
+    (mode === "approve" && isDaf && (validationOci === false || paiementImmediat === false));
+  const commentairePlaceholder =
+    mode === "reject"
+      ? "Motif du rejet (obligatoire)"
+      : mode === "return"
+        ? "Motif du retour pour modification (obligatoire)"
+        : mode === "approve" && isDaf && validationOci === false
+          ? "Commentaire obligatoire si Validé par OCI = Non"
+          : mode === "approve" && isDaf && paiementImmediat === false
+            ? "Commentaire obligatoire si paiement non immediat"
+            : "Optionnel";
+
   const totalMontant = useMemo(() => {
     const raw = demande?.montant_net != null ? demande.montant_net : demande?.montant;
     const n = Number(raw);
@@ -841,19 +856,16 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
           ) : null}
 
           <div>
-            <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire</div>
+            <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+              Commentaire{commentaireRequired ? " *" : ""}
+            </div>
             <textarea
               value={commentaire}
               onChange={(e) => setCommentaire(e.target.value)}
               rows={4}
+              required={commentaireRequired}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-              placeholder={
-                mode === "reject"
-                  ? "Motif du rejet (obligatoire)"
-                  : mode === "return"
-                    ? "Motif du retour pour modification (obligatoire)"
-                    : "Optionnel"
-              }
+              placeholder={commentairePlaceholder}
             />
           </div>
 
