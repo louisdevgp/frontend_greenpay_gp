@@ -32,6 +32,23 @@ function formatPhase(value) {
   return "-";
 }
 
+function mergeDateAndTime(dateOnly, timeSource) {
+  if (!dateOnly) return timeSource || null;
+  const d = dateOnly instanceof Date ? dateOnly : new Date(dateOnly);
+  if (Number.isNaN(d.getTime())) return timeSource || null;
+  const t = timeSource ? new Date(timeSource) : null;
+  if (!t || Number.isNaN(t.getTime())) return d;
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    t.getHours(),
+    t.getMinutes(),
+    t.getSeconds(),
+    t.getMilliseconds()
+  );
+}
+
 const initialState = {
   filters: { reference: "", dateStart: "", dateEnd: "" },
   page: 1,
@@ -168,7 +185,9 @@ export default function ReceptionsList({ mode = "all" }) {
         }
 
         if (state.filters.dateStart || state.filters.dateEnd) {
-          const targetDate = showDemandes ? row.created_at : row.date_reception;
+          const targetDate = showDemandes
+            ? row.created_at
+            : mergeDateAndTime(row.date_reception, row.created_at);
           if (state.filters.dateStart && new Date(targetDate) < new Date(parseDateOnlyStart(state.filters.dateStart))) return false;
           if (state.filters.dateEnd && new Date(targetDate) > new Date(parseDateOnlyEnd(state.filters.dateEnd))) return false;
         }
@@ -244,7 +263,7 @@ export default function ReceptionsList({ mode = "all" }) {
   const exportColumnsReceptions = [
     { header: "UUID", key: "uuid" },
     { header: "Receveur", value: (r) => r.receveur_nom || "-" },
-    { header: "Date réception", value: (r) => formatDateTime(r.date_reception) },
+    { header: "Date réception", value: (r) => formatDateTime(mergeDateAndTime(r.date_reception, r.created_at)) },
     { header: "Phase", value: (r) => formatPhase(r.phase) },
     { header: "Conforme", value: (r) => (r.conforme ? "Oui" : "Non") },
     { header: "Visa Directeur", value: (r) => (r.visa_directeur_id ? "Oui" : "Non") },
@@ -452,7 +471,9 @@ export default function ReceptionsList({ mode = "all" }) {
                     <tr key={reception.id}>
                       <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{reception.uuid}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{reception.receveur_nom}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(reception.date_reception)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                        {formatDateTime(mergeDateAndTime(reception.date_reception, reception.created_at))}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatPhase(reception.phase)}</td>
                       <td className="px-4 py-3 text-sm">
                         <span className={`px-2 py-1 text-xs rounded ${

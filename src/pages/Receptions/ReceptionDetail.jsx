@@ -32,6 +32,23 @@ function formatDateTime(iso) {
   }).format(d);
 }
 
+function mergeDateAndTime(dateOnly, timeSource) {
+  if (!dateOnly) return timeSource || null;
+  const d = dateOnly instanceof Date ? dateOnly : new Date(dateOnly);
+  if (Number.isNaN(d.getTime())) return timeSource || null;
+  const t = timeSource ? new Date(timeSource) : null;
+  if (!t || Number.isNaN(t.getTime())) return d;
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    t.getHours(),
+    t.getMinutes(),
+    t.getSeconds(),
+    t.getMilliseconds()
+  );
+}
+
 function formatPhase(value) {
   const v = String(value || "").trim().toUpperCase();
   if (v === "AVANT_PAIEMENT") return "Avant paiement";
@@ -518,7 +535,10 @@ export default function ReceptionDetail() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Info label="Receveur" value={reception.receveur_nom || "-"} />
-            <Info label="Date réception" value={formatDateTime(reception.date_reception)} />
+            <Info
+              label="Date réception"
+              value={formatDateTime(mergeDateAndTime(reception.date_reception, reception.created_at))}
+            />
             <Info label="Phase" value={formatPhase(reception.phase)} />
             <Info label="Créé" value={formatDateTime(reception.created_at)} />
             <Info label="Conforme" value={reception.conforme ? "Oui" : "Non"} />
