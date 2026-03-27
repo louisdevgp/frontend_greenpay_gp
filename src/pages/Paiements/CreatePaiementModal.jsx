@@ -274,9 +274,18 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     return Array.from(sources);
   }, [demandeResolved?.conditions_paiement]);
 
+  const lockedSource = useMemo(() => {
+    const list = demandeResolved?.conditions_paiement || [];
+    const paid = list.find((c) => c?.paiement_id);
+    return paid ? normalizeConditionSource(paid?.source) : "";
+  }, [demandeResolved?.conditions_paiement]);
+
   const conditionsSource = useMemo(
-    () => normalizeConditionSource(form.conditions_source || (availableSources.includes("DAF") ? "DAF" : "DEMANDEUR")),
-    [form.conditions_source, availableSources]
+    () =>
+      normalizeConditionSource(
+        form.conditions_source || lockedSource || (availableSources.includes("DAF") ? "DAF" : "DEMANDEUR")
+      ),
+    [form.conditions_source, lockedSource, availableSources]
   );
   const hasDafConditions = availableSources.includes("DAF");
 
@@ -284,6 +293,8 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     const all = demandeResolved?.conditions_paiement || [];
     return all.filter((c) => normalizeConditionSource(c?.source) === conditionsSource);
   }, [demandeResolved?.conditions_paiement, conditionsSource]);
+
+  const isSourceLocked = Boolean(lockedSource);
 
 
   // Calculer les montants restants à payer pour les tranches
@@ -352,7 +363,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     const sources = new Set(
       (demandeResolved?.conditions_paiement || []).map((c) => normalizeConditionSource(c?.source))
     );
-    const nextDefault = sources.has("DAF") ? "DAF" : "DEMANDEUR";
+    const nextDefault = lockedSource || (sources.has("DAF") ? "DAF" : "DEMANDEUR");
 
     setForm((prev) => {
       const prevValue = String(prev.conditions_source || "");
@@ -362,7 +373,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     });
 
     autoSourceRef.current = nextDefault;
-  }, [demandeResolved?.id, demandeResolved?.conditions_paiement]);
+  }, [demandeResolved?.id, demandeResolved?.conditions_paiement, lockedSource]);
 
   const validateMontant = () => {
     if (!demandeResolved) return null;
@@ -513,11 +524,16 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
               value={conditionsSource}
               onChange={(e) => setForm({ ...form, conditions_source: e.target.value })}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
-              disabled={loading || !hasDafConditions}
+              disabled={loading || !hasDafConditions || isSourceLocked}
             >
               <option value="DEMANDEUR">Demandeur</option>
               {hasDafConditions ? <option value="DAF">DAF</option> : null}
             </select>
+            {isSourceLocked ? (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Source verrouillÃ©e par un paiement prÃ©cÃ©dent ({lockedSource || "inconnue"}).
+              </p>
+            ) : null}
           </div>
 
           <div>
