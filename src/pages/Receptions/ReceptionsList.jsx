@@ -46,6 +46,7 @@ export default function ReceptionsList({ mode = "all" }) {
     .map((d) => String(d?.role_name || "").toUpperCase())
     .filter(Boolean);
   const effectiveRoles = new Set([...roles, ...delegatedRoles]);
+  const directionId = user?.agent?.direction_id ?? user?.agent?.directionId ?? null;
   const modeKey = String(mode || "all").trim().toLowerCase();
 
   const storageKey = useMemo(() => {
@@ -100,6 +101,7 @@ export default function ReceptionsList({ mode = "all" }) {
           page: state.page,
           pageSize: state.pageSize,
           statut: "approuvee,en_attente_paiement,paye",
+          ...(directionId ? { direction_id: Number(directionId), roleView: "DIRECTION" } : {}),
         };
 
         const res = await listAllDemandes(params);
