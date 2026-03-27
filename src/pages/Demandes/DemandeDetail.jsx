@@ -205,6 +205,7 @@ export default function DemandeDetail() {
     () => ["approuvee", "en_attente_paiement", "paye", "payee"].includes(statutLower),
     [statutLower]
   );
+  const isPaidStatut = useMemo(() => ["paye", "payee"].includes(statutLower), [statutLower]);
 
   const validationStopRole = useMemo(
     () => normalizeValidationStopRole(demande?.validation_stop_role),
@@ -333,7 +334,8 @@ export default function DemandeDetail() {
     statutEligibleForReception &&
     !isClosed &&
     !isRejected &&
-    !(hasReceptionBefore && hasReceptionAfter);
+    !(hasReceptionBefore && hasReceptionAfter) &&
+    !(isPaidStatut && hasReception);
 
   const doUpload = async () => {
     if (!demande?.id) return;
