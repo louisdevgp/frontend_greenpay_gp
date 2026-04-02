@@ -6,6 +6,7 @@ import { getDashboardStats } from "../../services/stats.service";
 import Chart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 import DatePicker from "../../components/form/date-picker";
+import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import { formatMoney } from "../../utils/formatUtils";
 
 type MoneyCount = { count?: number; montant?: number };
@@ -48,38 +49,32 @@ export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [directionId, setDirectionId] = useState("");
 
-  const [month, setMonth] = useState(() => {
+  const [periodStart, setPeriodStart] = useState(() => {
     const now = new Date();
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, "0");
-    return `${y}-${m}`; // YYYY-MM
+    return `${y}-${m}-01`;
+  });
+  const [periodEnd, setPeriodEnd] = useState(() => {
+    const now = new Date();
+    return now.toISOString().slice(0, 10);
   });
 
-  const buildPeriodParams = (yyyyMm: string) => {
-    const [yRaw, mRaw] = String(yyyyMm || "").split("-");
-    const y = Number(yRaw);
-    const m = Number(mRaw);
-    const now = new Date();
-
-    if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return {};
-
-    const from = new Date(y, m - 1, 1, 0, 0, 0, 0);
-
-    // si mois courant -> to = maintenant, sinon fin du mois
-    const isCurrentMonth = y === now.getFullYear() && m === now.getMonth() + 1;
-    const to = isCurrentMonth ? now : new Date(y, m, 0, 23, 59, 59, 999);
-
-    return {
-      from: from.toISOString(),
-      to: to.toISOString(),
-    };
+  const toDateString = (d: Date | null) => {
+    if (!d) return "";
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toISOString().slice(0, 10);
   };
 
-  const fetchData = async (yyyyMm = month, dirId = directionId) => {
+  const fetchData = async (dirId = directionId) => {
     setLoading(true);
     setError("");
     try {
-      const params = { ...buildPeriodParams(yyyyMm) } as Record<string, unknown>;
+      const params = {} as Record<string, unknown>;
+      const fromDate = parseDateOnlyStart(periodStart);
+      const toDate = parseDateOnlyEnd(periodEnd);
+      if (fromDate) params.from = fromDate.toISOString();
+      if (toDate) params.to = toDate.toISOString();
       if (dirId) params.direction_id = dirId;
       const res = await getDashboardStats(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement dashboard");
@@ -92,9 +87,9 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchData(month, directionId);
+    fetchData(directionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month, directionId]);
+  }, [periodStart, periodEnd, directionId]);
 
   const periodLabel = useMemo(() => {
     const fromIso = data?.period?.from;
@@ -293,7 +288,7 @@ export default function Home() {
               </h1>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
                 <span className="rounded-full border border-gray-200 bg-white/80 px-3 py-1 font-medium dark:border-gray-800 dark:bg-gray-900/70">
-                  {periodLabel ? `Période: ${periodLabel}` : "Période: mois en cours"}
+                  {periodLabel ? `Période: ${periodLabel}` : "Période: personnalisée"}
                 </span>
                 {directionBadge ? (
                   <span className="rounded-full border border-gray-200 bg-white/80 px-3 py-1 font-medium dark:border-gray-800 dark:bg-gray-900/70">
@@ -308,16 +303,16 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-end gap-3">
+            <div className="flex flex-nowrap items-end gap-3">
               {Array.isArray(data?.directions) && data.directions.length ? (
-                <div className="relative z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+                <div className="relative z-10 w-[210px] rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
                   <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
                     Direction
                   </label>
-                  <div className="mt-2 w-[200px] sm:w-[220px]">
+                  <div className="mt-2 w-full">
                     <select
                       id="dashboard-direction"
-                      className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-brand-400"
+                      className="w-full truncate rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-brand-400"
                       value={directionId}
                       onChange={(event) => setDirectionId(event.target.value)}
                     >
@@ -331,21 +326,33 @@ export default function Home() {
                   </div>
                 </div>
               ) : null}
-              <div className="relative z-10 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+              <div className="relative z-10 w-[310px] rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
                 <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-                  Mois
+                  Période
                 </label>
-                <div className="mt-2 w-[170px] sm:w-[190px]">
-                  <DatePicker
-                    id="dashboard-month"
-                    placeholder="YYYY-MM"
-                    dateFormat="Y-m"
-                    defaultDate={`${month}-01`}
-                    options={{ static: false }}
-                    onChange={(_date: Date | null, dateStr?: string) => {
-                      if (dateStr) setMonth(dateStr);
-                    }}
-                  />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div className="w-full">
+                    <div className="mb-1 text-[10px] font-medium uppercase text-gray-400">Du</div>
+                    <DatePicker
+                      id="dashboard-from"
+                      placeholder="YYYY-MM-DD"
+                      dateFormat="Y-m-d"
+                      defaultDate={periodStart || undefined}
+                      options={{ static: false }}
+                      onChange={(d: Date | null) => setPeriodStart(toDateString(d))}
+                    />
+                  </div>
+                  <div className="w-full">
+                    <div className="mb-1 text-[10px] font-medium uppercase text-gray-400">Au</div>
+                    <DatePicker
+                      id="dashboard-to"
+                      placeholder="YYYY-MM-DD"
+                      dateFormat="Y-m-d"
+                      defaultDate={periodEnd || undefined}
+                      options={{ static: false }}
+                      onChange={(d: Date | null) => setPeriodEnd(toDateString(d))}
+                    />
+                  </div>
                 </div>
               </div>
             </div>

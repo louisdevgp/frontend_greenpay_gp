@@ -9,8 +9,6 @@ export type ToastEventPayload = {
 
 export const TOAST_EVENT = "gp-toast";
 
-type LegacyArgs = [string, ToastVariant?];
-
 function normalizePayload(
   payloadOrMessage: ToastEventPayload | string,
   legacyVariant?: ToastVariant
@@ -26,8 +24,8 @@ function normalizePayload(
 
 export function emitToast(payload: ToastEventPayload): void;
 export function emitToast(message: string, variant?: ToastVariant): void;
-export function emitToast(payloadOrMessage: ToastEventPayload | string, ...rest: LegacyArgs) {
-  const payload = normalizePayload(payloadOrMessage, rest[0]);
+export function emitToast(payloadOrMessage: ToastEventPayload | string, variant?: ToastVariant) {
+  const payload = normalizePayload(payloadOrMessage, variant);
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(TOAST_EVENT, { detail: payload }));
 }

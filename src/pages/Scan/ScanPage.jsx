@@ -70,7 +70,13 @@ export default function ScanPage() {
   const valid = result?.valid;
 
   const detailHref =
-    type === "demande" ? `/demandes/${uuid}` : type === "reception" ? `/receptions/${uuid}` : null;
+    type === "demande"
+      ? `/demandes/${uuid}`
+      : type === "reception"
+        ? `/receptions/${uuid}`
+        : type === "validation"
+          ? `/validations/${uuid}`
+          : null;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -80,7 +86,7 @@ export default function ScanPage() {
             <div>
               <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Vérification QR</h1>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Ce QR code correspond à un document GreenPay (Demande ou Réception).
+                Ce QR code correspond à un document GreenPay (Demande, Réception ou Validation).
               </p>
             </div>
             <Link
@@ -126,17 +132,29 @@ export default function ScanPage() {
                     <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{result?.ref || "-"}</div>
                   </div>
                   <div className="p-4 border border-gray-200 rounded-lg dark:border-gray-800">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Finalisé le</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {type === "validation" ? "Signé le" : "Finalisé le"}
+                    </div>
                     <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                      {formatIso(result?.finalizedAt)}
+                      {formatIso(result?.validatedAt || result?.finalizedAt)}
                     </div>
                   </div>
                   <div className="p-4 border border-gray-200 rounded-lg dark:border-gray-800">
                     <div className="text-xs text-gray-500 dark:text-gray-400">Statut</div>
                     <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-                      {result?.document?.statut || (result?.isFinal ? "final" : "non-final")}
+                      {type === "validation"
+                        ? `${result?.role || "-"} — ${result?.status || "-"}`
+                        : result?.document?.statut || (result?.isFinal ? "final" : "non-final")}
                     </div>
                   </div>
+                  {type === "validation" ? (
+                    <div className="p-4 border border-gray-200 rounded-lg dark:border-gray-800">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">ID signature</div>
+                      <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white break-all">
+                        {result?.signature_id || "-"}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="p-4 border border-gray-200 rounded-lg dark:border-gray-800">
@@ -198,3 +216,5 @@ export default function ScanPage() {
     </div>
   );
 }
+
+

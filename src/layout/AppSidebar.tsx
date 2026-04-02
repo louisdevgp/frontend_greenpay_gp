@@ -53,6 +53,11 @@ type AuthUser = {
   permissions?: string[];
 };
 
+type PermissionDefinition = {
+  code?: string;
+  appliesTo?: string[];
+};
+
 const ADMIN_SUBITEMS: SubItem[] = [
   {
     name: "Utilisateurs & Hiérarchie",
@@ -136,7 +141,7 @@ export default function AppSidebar() {
   const { user } = useAuth() as { user?: AuthUser };
   const { pendingValidationsCount, pendingPaiementsCount, pendingReceptionsCount } = useRealtime();
 
-  const [permissionDefs, setPermissionDefs] = useState([]);
+  const [permissionDefs, setPermissionDefs] = useState<PermissionDefinition[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -146,7 +151,12 @@ export default function AppSidebar() {
         const res = await listPermissions();
         if (!active) return;
         if (res?.success) {
-          setPermissionDefs(res.data || res.items || []);
+          const items = Array.isArray(res.data)
+            ? res.data
+            : Array.isArray(res.items)
+              ? res.items
+              : [];
+          setPermissionDefs(items);
         }
       } catch {
         if (active) setPermissionDefs([]);
@@ -167,7 +177,7 @@ export default function AppSidebar() {
   const userPermissionSet = useMemo(() => new Set(userPermissions), [userPermissions]);
 
   const permissionMetaMap = useMemo(() => {
-    const map = new Map();
+    const map = new Map<string, string[]>();
     (permissionDefs || []).forEach((p) => {
       const code = normalizeCode(p?.code);
       if (!code) return;
