@@ -17,7 +17,7 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
     const hasAnyPaiement = Boolean(paiement?.id) || (demande?.paiements?.length || 0) > 0;
     const canAfter =
         hasAnyPaiement ||
-        ["en_attente_paiement", "paye", "payee", "cloture", "cloturee"].includes(statutLower);
+        ["en_attente_paiement", "achat_effectue", "paye", "payee", "cloture", "cloturee"].includes(statutLower);
 
     const [form, setForm] = useState({
         phase: "AVANT_PAIEMENT",

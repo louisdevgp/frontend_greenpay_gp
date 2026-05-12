@@ -19,24 +19,25 @@ export function labelDemandeStatut(statut) {
     draft: "Brouillon",
     brouillon: "Brouillon",
     soumise: "Soumise",
-    a_modifier: "À modifier",
+    a_modifier: "A modifier",
 
     validation_responsable: "Validation Responsable",
     validation_section: "Validation Section",
-    validation_entite: "Validation Entité",
-    validation_entite_generale: "Validation Entité Générale",
+    validation_entite: "Validation Entite",
+    validation_entite_generale: "Validation Entite Generale",
     validation_directeur: "Validation Directeur",
     validation_daf: "Validation DAF",
     validation_dga: "Validation DGA",
     validation_dg: "Validation DG",
 
     en_attente_paiement: "En attente de paiement",
-    approuvee: "Approuvée",
-    paye: "Payée",
-    receptionnee: "Réceptionnée",
-    cloture: "Clôturée",
-    rejete: "Rejetée",
-    rejetee: "Rejetée",
+    achat_effectue: "Achat effectue",
+    approuvee: "Approuvee",
+    paye: "Payee",
+    receptionnee: "Receptionnee",
+    cloture: "Cloturee",
+    rejete: "Rejetee",
+    rejetee: "Rejetee",
   };
 
   return map[k] || titleizeFromKey(k);
@@ -47,16 +48,15 @@ export function labelValidationStepStatus(status) {
   if (!k) return "-";
 
   const map = {
-    valide: "Validé",
+    valide: "Validee",
     en_attente: "En attente",
-    bloque: "Bloqué",
-    retour_modification: "Retournée (modification)",
-    rejete: "Rejeté",
-    rejetee: "Rejeté",
-    "rejeté": "Rejeté",
-    annule: "Annulée",
-    annulee: "Annulée",
-    annulation: "Annulée",
+    bloque: "Bloquee",
+    retour_modification: "Retournee (modification)",
+    rejete: "Rejetee",
+    rejetee: "Rejetee",
+    annule: "Annulee",
+    annulee: "Annulee",
+    annulation: "Annulee",
   };
 
   return map[k] || titleizeFromKey(k);
@@ -99,10 +99,11 @@ export function demandeStatusBadgeClass(statut) {
   if (k === "en_cours_validation" || k.startsWith("validation_")) return classes.indigo;
   if (k === "approuvee") return classes.green;
   if (k === "en_attente_paiement") return classes.fuchsia;
+  if (k === "achat_effectue") return classes.violet;
   if (k === "paye" || k === "payee") return classes.emerald;
   if (k === "receptionnee") return classes.cyan;
   if (k === "cloture" || k === "cloturee") return classes.slate;
-  if (k === "rejete" || k === "rejetee" || k === "rejeté") return classes.red;
+  if (k === "rejete" || k === "rejetee") return classes.red;
 
   return classes.gray;
 }

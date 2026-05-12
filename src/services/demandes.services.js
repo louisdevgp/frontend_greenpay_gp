@@ -85,3 +85,15 @@ export async function uploadManyDocuments({ files = [], demande_id, type_documen
   }
   return results;
 }
+
+export async function listAcheteurCandidates(idOrUuid) {
+  const res = await api.get(`/demandes/${idOrUuid}/acheteurs-candidats`);
+  return res.data;
+}
+
+export async function assignDemandeAcheteur(idOrUuid, acheteurId) {
+  const res = await api.patch(`/demandes/${idOrUuid}/acheteur`, {
+    acheteur_id: acheteurId ?? null,
+  });
+  return res.data;
+}

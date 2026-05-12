@@ -77,7 +77,12 @@ function getRoleViewLabel(roleView, scopes = []) {
 export default function DemandesAllList() {
   const { user, hasPermission } = useAuth();
   const listScopes = useMemo(
-    () => collectScopesForPermissions(user, ["DEMANDE_LIST", "DEMANDE_LIST_ALL"]),
+    () =>
+      collectScopesForPermissions(user, [
+        "DEMANDE_LIST",
+        "DEMANDE_LIST_ALL",
+        "DEMANDE_LIST_ASSIGNED_ACHETEUR",
+      ]),
     [user]
   );
   const canGlobal = hasGlobalScope(listScopes);
@@ -278,6 +283,7 @@ export default function DemandesAllList() {
               <option value="validation_dg">Validation DG</option>
               <option value="approuvee">Approuvée</option>
               <option value="en_attente_paiement">En attente de paiement</option>
+              <option value="achat_effectue">Achat effectue</option>
               <option value="paye">Payée</option>
               <option value="receptionnee">Réceptionnée</option>
               <option value="cloture">Clôturée</option>

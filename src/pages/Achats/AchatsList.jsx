@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { FiDollarSign, FiEye, FiRefreshCw } from "react-icons/fi";
+import { FiEye, FiRefreshCw } from "react-icons/fi";
 import { listAllDemandes } from "../../services/demandes.services";
 import Pagination from "../../components/common/Pagination";
 import Loader from "../../components/common/Loader";
@@ -11,28 +11,22 @@ import DatePicker from "../../components/form/date-picker";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
-import CreatePaiementModal from "./CreatePaiementModal";
 import { useRealtime } from "../../context/RealtimeContext.tsx";
 
-const STORAGE_KEY = "filters:paiements:pending";
-const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "achat_effectue", "receptionnee"]);
-const PAID_CONDITION_STATUSES = new Set(["paye", "payee", "regle", "reglee"]);
+const MODE_STATUSES = {
+  pending: ["en_attente_paiement", "paye", "payee"],
+  done: ["achat_effectue", "receptionnee", "cloture", "cloturee"],
+  all: ["en_attente_paiement", "paye", "payee", "achat_effectue", "receptionnee", "cloture", "cloturee"],
+};
 
-function isPayableStatus(statut) {
-  return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
+function normalizeMode(mode) {
+  const key = String(mode || "all").trim().toLowerCase();
+  if (key === "pending" || key === "done" || key === "all") return key;
+  return "all";
 }
 
-function isConditionPaid(condition) {
-  if (!condition) return false;
-  if (condition.paiement_id) return true;
-  const statusKey = String(condition.statut || "").toLowerCase();
-  return PAID_CONDITION_STATUSES.has(statusKey);
-}
-
-function isFullyPaid(demande) {
-  const conditions = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
-  if (!conditions.length) return false;
-  return conditions.every(isConditionPaid);
+function statusSetForMode(modeKey) {
+  return new Set((MODE_STATUSES[modeKey] || MODE_STATUSES.all).map((s) => String(s).toLowerCase()));
 }
 
 function formatDate(input) {
@@ -48,30 +42,37 @@ const initialState = {
   pageSize: 10,
 };
 
-export default function PaiementsPending() {
-  const { paiementsTick } = useRealtime();
+export default function AchatsList({ mode = "all" }) {
+  const { achatsTick } = useRealtime();
+  const modeKey = useMemo(() => normalizeMode(mode), [mode]);
+  const modeStatusSet = useMemo(() => statusSetForMode(modeKey), [modeKey]);
+  const storageKey = useMemo(() => `filters:achats:${modeKey}`, [modeKey]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState([]);
   const [filtered, setFiltered] = useState([]);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [selectedDemandeId, setSelectedDemandeId] = useState("");
 
   const [state, setState] = useState(() => {
-    const saved = loadPersistedState(STORAGE_KEY);
+    const saved = loadPersistedState(storageKey);
     return saved ? { ...initialState, ...saved } : initialState;
   });
+
+  useEffect(() => {
+    const saved = loadPersistedState(storageKey);
+    setState(saved ? { ...initialState, ...saved } : initialState);
+  }, [storageKey]);
 
   const fetch = async () => {
     setLoading(true);
     setError("");
     try {
-      const statutParam = state.filters.statut
-        ? state.filters.statut
-        : "approuvee,en_attente_paiement,achat_effectue,receptionnee";
+      const defaultStatuts = Array.from(modeStatusSet).join(",");
+      const statutParam = state.filters.statut ? state.filters.statut : defaultStatuts;
       const params = {
         page: state.page,
         pageSize: state.pageSize,
+        assigned_acheteur: 1,
         statut: statutParam,
         ...(state.filters.beneficiaire ? { beneficiaire: state.filters.beneficiaire } : {}),
         ...(state.filters.dateStart ? { dateStart: state.filters.dateStart } : {}),
@@ -79,8 +80,8 @@ export default function PaiementsPending() {
       };
 
       const res = await listAllDemandes(params);
-      if (!res?.success) throw new Error(res?.message || "Erreur chargement demandes");
-      const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut) && !isFullyPaid(d));
+      if (!res?.success) throw new Error(res?.message || "Erreur chargement achats");
+      const rows = (res.data || []).filter((d) => modeStatusSet.has(String(d?.statut || "").toLowerCase()));
       setData(rows);
       setFiltered(rows);
     } catch (e) {
@@ -94,11 +95,11 @@ export default function PaiementsPending() {
 
   useEffect(() => {
     fetch();
-  }, [state.page, state.pageSize, state.filters]);
+  }, [state.page, state.pageSize, state.filters, modeKey]);
 
   useEffect(() => {
-    if (paiementsTick > 0) fetch();
-  }, [paiementsTick]);
+    if (achatsTick > 0) fetch();
+  }, [achatsTick]);
 
   useEffect(() => {
     if (state.filters.statut || state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {
@@ -118,20 +119,20 @@ export default function PaiementsPending() {
   const resetFilters = () => {
     const newState = { ...initialState, page: 1 };
     setState(newState);
-    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+    savePersistedState(storageKey, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
 
   const updateFilter = (key, value) => {
     const newFilters = { ...state.filters, [key]: value };
     const newState = { ...state, filters: newFilters, page: 1 };
     setState(newState);
-    savePersistedState(STORAGE_KEY, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
+    savePersistedState(storageKey, { filters: newFilters, page: newState.page, pageSize: newState.pageSize });
   };
 
   const updatePagination = (page, pageSize) => {
     const newState = { ...state, page, pageSize };
     setState(newState);
-    savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
+    savePersistedState(storageKey, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
 
   const total = filtered.length;
@@ -140,46 +141,43 @@ export default function PaiementsPending() {
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
+  const title =
+    modeKey === "pending"
+      ? "Achats en attente"
+      : modeKey === "done"
+        ? "Achats effectues"
+        : "Mes achats";
+
+  const emptyMessage =
+    modeKey === "pending"
+      ? "Aucun achat en attente."
+      : modeKey === "done"
+        ? "Aucun achat effectue."
+        : "Aucun achat assigne.";
+
   const exportColumns = [
     { header: "UUID", key: "uuid" },
     { header: "Motif", key: "motif" },
     { header: "Montant", value: (d) => `${formatMoney(d.montant_net ?? d.montant)} FCFA` },
     { header: "Statut", value: (d) => labelDemandeStatut(d.statut) },
-    { header: "Moyen", value: (d) => d?.daf_critere4 || "-" },
-    { header: "Bénéficiaire", value: (d) => d?.beneficiaire || "-" },
-    { header: "Créé", value: (d) => formatDateTime(d.created_at) },
+    { header: "Beneficiaire", value: (d) => d?.beneficiaire || "-" },
+    { header: "Cree", value: (d) => formatDateTime(d.created_at) },
   ];
   const handleExport = () => {
     const dateTag = new Date().toISOString().slice(0, 10);
     exportRowsToExcel({
       rows: filtered,
       columns: exportColumns,
-      filename: `paiements_en_attente_${dateTag}.xlsx`,
-      sheetName: "Demandes",
+      filename: `achats_${modeKey}_${dateTag}.xlsx`,
+      sheetName: "Achats",
     });
-  };
-
-  const openCreate = (demandeId = "") => {
-    setSelectedDemandeId(demandeId ? String(demandeId) : "");
-    setCreateOpen(true);
-  };
-
-  const closeCreate = () => {
-    setCreateOpen(false);
-    setSelectedDemandeId("");
   };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Paiements en attente</h1>
+        <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">{title}</h1>
         <div className="flex gap-2">
-          <button
-            onClick={() => openCreate("")}
-            className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:opacity-90"
-          >
-            Nouveau paiement
-          </button>
           <ExportButton
             onExport={handleExport}
             disabled={!filtered.length}
@@ -213,15 +211,16 @@ export default function PaiementsPending() {
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
             >
               <option value="">Tous</option>
-              <option value="approuvee">Approuvée</option>
               <option value="en_attente_paiement">En attente de paiement</option>
+              <option value="paye">Payee</option>
               <option value="achat_effectue">Achat effectue</option>
-              <option value="receptionnee">Réceptionnée</option>
+              <option value="receptionnee">Receptionnee</option>
+              <option value="cloture">Cloturee</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400">Bénéficiaire</label>
+            <label className="block text-xs text-gray-500 dark:text-gray-400">Beneficiaire</label>
             <input
               type="text"
               value={state.filters.beneficiaire}
@@ -255,10 +254,10 @@ export default function PaiementsPending() {
             onClick={resetFilters}
             className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
-            Réinitialiser
+            Reinitialiser
           </button>
           <button
-            onClick={clearPersistedState.bind(null, STORAGE_KEY)}
+            onClick={clearPersistedState.bind(null, storageKey)}
             className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
             Effacer filtres
@@ -271,7 +270,7 @@ export default function PaiementsPending() {
           <Loader label="Chargement des donnees..." />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="p-4 text-center text-gray-500 dark:text-gray-400">Aucune demande à payer.</div>
+        <div className="p-4 text-center text-gray-500 dark:text-gray-400">{emptyMessage}</div>
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -282,9 +281,8 @@ export default function PaiementsPending() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Motif</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Moyen</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Beneficiaire</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Cree</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
@@ -299,29 +297,17 @@ export default function PaiementsPending() {
                         {labelDemandeStatut(demande.statut)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.daf_critere4 || "-"}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire || "-"}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
                     <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openCreate(demande.id)}
-                          title="Payer"
-                          aria-label="Payer"
-                          className="inline-flex items-center justify-center p-2 rounded-lg bg-emerald-600 text-white hover:opacity-90"
-                        >
-                          <FiDollarSign />
-                        </button>
-                        <Link
-                          to={`/demandes/${demande.uuid}`}
-                          title="Voir"
-                          aria-label="Voir"
-                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                        >
-                          <FiEye />
-                        </Link>
-                      </div>
+                      <Link
+                        to={`/demandes/${demande.uuid}`}
+                        title="Voir"
+                        aria-label="Voir"
+                        className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
+                      >
+                        <FiEye />
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -338,19 +324,7 @@ export default function PaiementsPending() {
           />
         </>
       )}
-
-      <CreatePaiementModal
-        open={createOpen}
-        onClose={closeCreate}
-        onCreated={() => {
-          fetch();
-        }}
-        defaultDemandeId={selectedDemandeId}
-      />
     </div>
   );
 }
-
-
-
 

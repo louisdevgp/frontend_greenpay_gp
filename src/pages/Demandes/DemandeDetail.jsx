@@ -1,6 +1,13 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { getDemande, deleteDemande, closeDemande, getDemandeValidationHistory } from "../../services/demandes.services";
+import {
+  getDemande,
+  deleteDemande,
+  closeDemande,
+  getDemandeValidationHistory,
+  listAcheteurCandidates,
+  assignDemandeAcheteur,
+} from "../../services/demandes.services";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
 import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
@@ -18,6 +25,16 @@ import Loader from "../../components/common/Loader";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 
 const DAF_CRITERE4_LABEL = "Moyen de paiement";
+const ACHETEUR_ALLOWED_UPLOAD_TYPES = new Set(["preuve_achat", "facture", "bon_livraison"]);
+
+function normalizeUploadType(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isAcheteurAllowedUploadType(typeDocument) {
+  const normalized = normalizeUploadType(typeDocument);
+  return ACHETEUR_ALLOWED_UPLOAD_TYPES.has(normalized);
+}
 
 function parseBooleanLike(value) {
   if (value === true || value === false) return value;
@@ -93,6 +110,7 @@ export default function DemandeDetail() {
   const canDeleteDemande = hasPermission("DEMANDE_DELETE");
   const canCloseDemande = hasPermission("DEMANDE_CLOSE");
   const canCreateReceptionPerm = hasPermission("RECEPTION_CREATE");
+  const canAssignAcheteurPerm = hasPermission("DEMANDE_ASSIGN_ACHETEUR");
   const canViewPaiementDetails = hasPermission("PAIEMENT_GET");
   const canDownloadPdf = hasAnyPermission(["DEMANDE_PDF", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]);
 
@@ -118,6 +136,11 @@ export default function DemandeDetail() {
   const [uploadType, setUploadType] = useState("devis_proforma");
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
+  const [acheteurCandidates, setAcheteurCandidates] = useState([]);
+  const [acheteurLoading, setAcheteurLoading] = useState(false);
+  const [acheteurSaving, setAcheteurSaving] = useState(false);
+  const [acheteurDraft, setAcheteurDraft] = useState("");
+  const [acheteurError, setAcheteurError] = useState("");
   const [downloadState, setDownloadState] = useState({});
 
   const isDownloading = (key) => !!downloadState[key];
@@ -181,6 +204,42 @@ export default function DemandeDetail() {
     }
   };
 
+  const loadAcheteurCandidates = async (idOrUuid) => {
+    if (!idOrUuid) return;
+    setAcheteurLoading(true);
+    setAcheteurError("");
+    try {
+      const res = await listAcheteurCandidates(idOrUuid);
+      if (!res?.success) throw new Error(res?.message || "Erreur chargement acheteurs");
+      setAcheteurCandidates(Array.isArray(res?.data?.acheteurs) ? res.data.acheteurs : []);
+    } catch (e) {
+      setAcheteurCandidates([]);
+      setAcheteurError(e?.message || "Erreur chargement acheteurs");
+    } finally {
+      setAcheteurLoading(false);
+    }
+  };
+
+  const saveAcheteurAssignment = async () => {
+    if (!demande?.uuid || acheteurSaving) return;
+    setAcheteurSaving(true);
+    setAcheteurError("");
+    try {
+      const selectedAcheteurId = acheteurDraft ? Number(acheteurDraft) : null;
+      const res = await assignDemandeAcheteur(demande.uuid, selectedAcheteurId);
+      if (!res?.success) throw new Error(res?.message || "Affectation impossible");
+      emitToast(selectedAcheteurId ? "Acheteur assigne" : "Acheteur retire", "success");
+      await fetchDemande();
+      if (canAssignAcheteur) await loadAcheteurCandidates(demande.uuid);
+    } catch (e) {
+      const msg = e?.message || "Erreur affectation acheteur";
+      setAcheteurError(msg);
+      emitToast(msg, "error");
+    } finally {
+      setAcheteurSaving(false);
+    }
+  };
+
   useEffect(() => {
     fetchDemande();
   }, [uuid]);
@@ -191,18 +250,27 @@ export default function DemandeDetail() {
     }
   }, [demande?.id]);
 
+  useEffect(() => {
+    setAcheteurDraft(demande?.acheteur_id != null ? String(demande.acheteur_id) : "");
+  }, [demande?.acheteur_id]);
+
   const agentId = user?.agent?.id ?? user?.agent_id ?? user?.agentId;
   const isAdmin = roles.includes("ADMIN");
   const isOwner = useMemo(() => {
     if (!demande || !agentId) return false;
     return Number(demande.demandeur_id) === Number(agentId);
   }, [demande, agentId]);
+  const assignedAcheteur = demande?.agents_demandes_paiement_acheteur_idToagents || null;
+  const isAssignedAcheteur = useMemo(() => {
+    if (!demande || !agentId || demande?.acheteur_id == null) return false;
+    return Number(demande.acheteur_id) === Number(agentId);
+  }, [demande, agentId]);
 
   const statutLower = useMemo(() => String(demande?.statut || "").toLowerCase(), [demande?.statut]);
   const isClosed = useMemo(() => ["cloture", "cloturee"].includes(statutLower), [statutLower]);
   const isRejected = useMemo(() => ["rejete", "rejetee"].includes(statutLower), [statutLower]);
   const statutEligibleForReception = useMemo(
-    () => ["approuvee", "en_attente_paiement", "paye", "payee"].includes(statutLower),
+    () => ["approuvee", "en_attente_paiement", "achat_effectue", "paye", "payee"].includes(statutLower),
     [statutLower]
   );
   const isPaidStatut = useMemo(() => ["paye", "payee"].includes(statutLower), [statutLower]);
@@ -320,6 +388,9 @@ export default function DemandeDetail() {
     [receptions]
   );
   const hasReception = receptions.length > 0;
+  const hasAnyPaiement = (demande?.paiements || []).length > 0;
+  const receptionNeedsAchatStatus = demande?.acheteur_id != null;
+  const canAssignAcheteur = canAssignAcheteurPerm && !isClosed && hasAnyPaiement;
 
   const canCancel = canDeleteDemande && (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
   const canClose =
@@ -329,13 +400,33 @@ export default function DemandeDetail() {
     (hasReception || ["receptionnee", "paye", "payee"].includes(statutLower));
   const canCreateReception =
     canCreateReceptionPerm &&
-    isOwner &&
+    (isOwner || isAssignedAcheteur) &&
     allValidationsApproved &&
     statutEligibleForReception &&
+    (!receptionNeedsAchatStatus || statutLower === "achat_effectue") &&
     !isClosed &&
     !isRejected &&
     !(hasReceptionBefore && hasReceptionAfter) &&
     !(isPaidStatut && hasReception);
+  const currentAcheteurId = demande?.acheteur_id != null ? String(demande.acheteur_id) : "";
+  const hasAcheteurSelectionChanged = String(acheteurDraft || "") !== currentAcheteurId;
+  const canSaveAcheteur = canAssignAcheteur && hasAcheteurSelectionChanged && !acheteurLoading && !acheteurSaving;
+
+  useEffect(() => {
+    if (canAssignAcheteur && demande?.uuid) {
+      loadAcheteurCandidates(demande.uuid);
+      return;
+    }
+    setAcheteurCandidates([]);
+    setAcheteurError("");
+  }, [canAssignAcheteur, demande?.uuid]);
+
+  useEffect(() => {
+    if (!isAssignedAcheteur) return;
+    if (isAcheteurAllowedUploadType(uploadType)) return;
+    setUploadType("preuve_achat");
+    setUploadTypeAutre("");
+  }, [isAssignedAcheteur, uploadType]);
 
   const doUpload = async () => {
     if (!demande?.id) return;
@@ -349,6 +440,10 @@ export default function DemandeDetail() {
           : uploadType;
       if (uploadType === "autre" && (!uploadTypeAutre || !String(uploadTypeAutre).trim())) {
         throw new Error("Veuillez préciser le type (Autre)");
+      }
+
+      if (isAssignedAcheteur && !isAcheteurAllowedUploadType(typeDoc)) {
+        throw new Error("En tant qu'acheteur assigne, vous ne pouvez uploader que preuve_achat, facture ou bon_livraison.");
       }
 
       setUploading(true);
@@ -813,6 +908,7 @@ export default function DemandeDetail() {
                 { label: "Créé", value: formatDateTime(demande.created_at) },
                 { label: "Mis à jour", value: formatDateTime(demande.updated_at) },
                 { label: "Demandeur", value: agentDisplayName(demandeurAgent) },
+                { label: "Acheteur assigne", value: assignedAcheteur ? agentDisplayName(assignedAcheteur) : "-" },
                 { label: "Direction", value: demandeurDirection },
                 { label: "Département", value: demandeurDepartement },
                 { label: "Service", value: demandeurService },
@@ -839,6 +935,51 @@ export default function DemandeDetail() {
               ))}
             </dl>
           </div>
+
+          {canAssignAcheteur ? (
+            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Affectation acheteur</div>
+              {acheteurError ? (
+                <div className="mt-2 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                  {acheteurError}
+                </div>
+              ) : null}
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-gray-500 dark:text-gray-400">Acheteur de la direction</label>
+                  <select
+                    value={acheteurDraft}
+                    onChange={(e) => setAcheteurDraft(e.target.value)}
+                    disabled={acheteurLoading || acheteurSaving}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60"
+                  >
+                    <option value="">Aucun</option>
+                    {acheteurCandidates.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {`${a.prenom || ""} ${a.nom || ""}`.trim() || a.email || `Agent #${a.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-1 flex items-end justify-end">
+                  <button
+                    type="button"
+                    onClick={saveAcheteurAssignment}
+                    disabled={!canSaveAcheteur}
+                    className={`inline-flex items-center justify-center p-2 rounded-lg ${
+                      canSaveAcheteur
+                        ? "bg-gray-900 text-white hover:opacity-90 dark:bg-white dark:text-gray-900"
+                        : "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
+                    }`}
+                    title={acheteurSaving ? "Enregistrement..." : "Enregistrer"}
+                    aria-label={acheteurSaving ? "Enregistrement..." : "Enregistrer"}
+                  >
+                    {acheteurSaving ? <Loader inline size="sm" label="" /> : <FiCheckCircle />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {/* Section Remise */}
           {remiseType && remiseValeur != null && (
@@ -1187,14 +1328,27 @@ export default function DemandeDetail() {
                     }}
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
                   >
-                    <option value="devis_proforma">Devis / Proforma</option>
-                    <option value="facture_proforma">Facture proforma</option>
-                    <option value="contrat">Contrat</option>
-                    <option value="autre">Autre</option>
+                    {isAssignedAcheteur ? (
+                      <>
+                        <option value="preuve_achat">Preuve d'achat</option>
+                        <option value="facture">Facture finale</option>
+                        <option value="bon_livraison">Bon de livraison</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="devis_proforma">Devis / Proforma</option>
+                        <option value="facture_proforma">Facture proforma</option>
+                        <option value="preuve_achat">Preuve d'achat</option>
+                        <option value="facture">Facture finale</option>
+                        <option value="bon_livraison">Bon de livraison</option>
+                        <option value="contrat">Contrat</option>
+                        <option value="autre">Autre</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
-                {uploadType === "autre" ? (
+                {uploadType === "autre" && !isAssignedAcheteur ? (
                   <div>
                     <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Préciser</div>
                     <input
@@ -1206,7 +1360,7 @@ export default function DemandeDetail() {
                   </div>
                 ) : null}
 
-                <div className={uploadType === "autre" ? "sm:col-span-1" : "sm:col-span-2"}>
+                <div className={uploadType === "autre" && !isAssignedAcheteur ? "sm:col-span-1" : "sm:col-span-2"}>
                   <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Fichiers</div>
                   <input
                     type="file"

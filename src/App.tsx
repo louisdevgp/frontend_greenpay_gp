@@ -48,6 +48,7 @@ import ValidationDetail from "./pages/Validations/ValidationDetail";
 import ReceptionsList from "./pages/Receptions/ReceptionsList";
 import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
 import SignatureTest from "./pages/Tests/SignatureTest";
+import AchatsList from "./pages/Achats/AchatsList";
 
 // admin
 import PeopleAdmin from "./pages/Admin/PeopleAdmin";
@@ -117,17 +118,24 @@ export default function App() {
               </Route>
 
               {/* Demandes */}
-              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL"]} />}>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_ASSIGNED_ACHETEUR"]} />}>
                 <Route path="/demandes/all" element={<DemandesAllList />} />
               </Route>
               <Route element={<PermissionGuard allow={["DEMANDE_LIST_SELF"]} />}>
                 <Route path="/demandes/my" element={<DemandesMyList />} />
               </Route>
-              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_SELF", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_SELF", "DEMANDE_LIST_ASSIGNED_ACHETEUR", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
                 <Route path="/demandes/:uuid" element={<DemandeDetail />} />
               </Route>
               <Route element={<PermissionGuard allow={["DEMANDE_CREATE"]} />}>
                 <Route path="/demandes/create" element={<CreateDemande />} />
+              </Route>
+
+              {/* Achats (acheteur assigne) */}
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST_ASSIGNED_ACHETEUR"]} />}>
+                <Route path="/achats" element={<AchatsList mode="all" />} />
+                <Route path="/achats/pending" element={<AchatsList mode="pending" />} />
+                <Route path="/achats/done" element={<AchatsList mode="done" />} />
               </Route>
 
               {/* Validations */}

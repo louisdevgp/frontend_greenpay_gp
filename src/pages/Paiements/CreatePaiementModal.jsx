@@ -23,7 +23,7 @@ function normalizeConditionSource(value) {
   return v === "DAF" ? "DAF" : "DEMANDEUR";
 }
 
-const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "receptionnee"]);
+const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "achat_effectue", "receptionnee"]);
 
 function isPayableStatus(statut) {
   return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
@@ -56,7 +56,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
 
   const fetchDemandes = async () => {
     try {
-      const res = await listAllDemandes({ statut: "approuvee,en_attente_paiement,receptionnee" });
+      const res = await listAllDemandes({ statut: "approuvee,en_attente_paiement,achat_effectue,receptionnee" });
       if (res?.success) {
         const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut));
         setDemandes(rows);

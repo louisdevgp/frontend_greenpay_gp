@@ -207,6 +207,7 @@ export default function DemandesMyList() {
               <option value="validation_dg">Validation DG</option>
               <option value="approuvee">Approuvée</option>
               <option value="en_attente_paiement">En attente de paiement</option>
+              <option value="achat_effectue">Achat effectue</option>
               <option value="paye">Payée</option>
               <option value="receptionnee">Réceptionnée</option>
               <option value="cloture">Clôturée</option>

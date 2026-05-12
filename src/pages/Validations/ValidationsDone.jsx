@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiEye, FiRefreshCw, FiX } from "react-icons/fi";
 import { cancelValidation, listValidationsDone } from "../../services/validations.service";
@@ -340,6 +340,7 @@ export default function ValidationsDone() {
                     "paye",
                     "payee",
                     "en_attente_paiement",
+                    "achat_effectue",
                     "receptionnee",
                     "cloture",
                     "cloturee",

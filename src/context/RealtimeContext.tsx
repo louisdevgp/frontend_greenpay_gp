@@ -20,8 +20,10 @@ type RealtimeContextValue = {
   validationsTick: number;
   pendingPaiementsCount: number;
   pendingReceptionsCount: number;
+  pendingAchatsCount: number;
   paiementsTick: number;
   receptionsTick: number;
+  achatsTick: number;
   loadingNotifications: boolean;
   refreshNotifications: () => Promise<void>;
   markAsRead: (notif: NotificationItem) => Promise<void>;
@@ -62,8 +64,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [validationsTick, setValidationsTick] = useState(0);
   const [pendingPaiementsCount, setPendingPaiementsCount] = useState(0);
   const [pendingReceptionsCount, setPendingReceptionsCount] = useState(0);
+  const [pendingAchatsCount, setPendingAchatsCount] = useState(0);
   const [paiementsTick, setPaiementsTick] = useState(0);
   const [receptionsTick, setReceptionsTick] = useState(0);
+  const [achatsTick, setAchatsTick] = useState(0);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
@@ -113,8 +117,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       setValidationsTick(0);
       setPendingPaiementsCount(0);
       setPendingReceptionsCount(0);
+      setPendingAchatsCount(0);
       setPaiementsTick(0);
       setReceptionsTick(0);
+      setAchatsTick(0);
       return;
     }
 
@@ -173,6 +179,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       ) {
         setReceptionsTick((t) => t + 1);
       }
+      if (["demande_acheteur_assigne", "demande_acheteur_retire"].includes(type)) {
+        setAchatsTick((t) => t + 1);
+      }
       setNotifications((prev) => {
         if (prev.some((n) => n.id === notif.id)) return prev;
         if (type === "validation_pending" && !notif.read_at) {
@@ -222,6 +231,16 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const handleAchatPendingStatus = (payload: { count?: number; hasPending?: boolean }) => {
+      if (typeof payload?.count === "number") {
+        setPendingAchatsCount(payload.count);
+        return;
+      }
+      if (typeof payload?.hasPending === "boolean") {
+        setPendingAchatsCount(payload.hasPending ? 1 : 0);
+      }
+    };
+
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("notification:new", handleNotificationNew);
@@ -229,6 +248,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     socket.on("validation:pending_status", handlePendingStatus);
     socket.on("paiement:pending_status", handlePaiementPendingStatus);
     socket.on("reception:pending_status", handleReceptionPendingStatus);
+    socket.on("achat:pending_status", handleAchatPendingStatus);
 
     return () => {
       socket.off("connect", handleConnect);
@@ -238,6 +258,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       socket.off("validation:pending_status", handlePendingStatus);
       socket.off("paiement:pending_status", handlePaiementPendingStatus);
       socket.off("reception:pending_status", handleReceptionPendingStatus);
+      socket.off("achat:pending_status", handleAchatPendingStatus);
       socket.disconnect();
       socketRef.current = null;
     };
@@ -252,8 +273,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       validationsTick,
       pendingPaiementsCount,
       pendingReceptionsCount,
+      pendingAchatsCount,
       paiementsTick,
       receptionsTick,
+      achatsTick,
       loadingNotifications,
       refreshNotifications,
       markAsRead,
@@ -266,8 +289,10 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       validationsTick,
       pendingPaiementsCount,
       pendingReceptionsCount,
+      pendingAchatsCount,
       paiementsTick,
       receptionsTick,
+      achatsTick,
       loadingNotifications,
       refreshNotifications,
       markAsRead,

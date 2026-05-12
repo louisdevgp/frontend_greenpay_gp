@@ -84,7 +84,12 @@ const MENU_ITEMS: MenuItem[] = [
     name: "Demandes",
     subItems: [
       { name: "Mes demandes", path: "/demandes/my", icon: <FileIcon />, permission: "DEMANDE_LIST_SELF" },
-      { name: "Toutes les demandes", path: "/demandes/all", icon: <FileIcon />, permissions: ["DEMANDE_LIST", "DEMANDE_LIST_ALL"] },
+      {
+        name: "Toutes les demandes",
+        path: "/demandes/all",
+        icon: <FileIcon />,
+        permissions: ["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_ASSIGNED_ACHETEUR"],
+      },
       { name: "Nouvelle demande", path: "/demandes/create", icon: <PlusIcon />, permission: "DEMANDE_CREATE", new: true },
     ],
   },
@@ -119,6 +124,16 @@ const MENU_ITEMS: MenuItem[] = [
   },
   {
     section: "main",
+    icon: <TableIcon />,
+    name: "Achats",
+    subItems: [
+      { name: "Mes achats", path: "/achats", icon: <FileIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
+      { name: "En attente", path: "/achats/pending", icon: <TimeIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
+      { name: "Effectués", path: "/achats/done", icon: <CheckCircleIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
+    ],
+  },
+  {
+    section: "main",
     icon: <BoxCubeIcon />,
     name: "Administration",
     subItems: ADMIN_SUBITEMS,
@@ -139,7 +154,7 @@ export default function AppSidebar() {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const location = useLocation();
   const { user } = useAuth() as { user?: AuthUser };
-  const { pendingValidationsCount, pendingPaiementsCount, pendingReceptionsCount } = useRealtime();
+  const { pendingValidationsCount, pendingPaiementsCount, pendingReceptionsCount, pendingAchatsCount } = useRealtime();
 
   const [permissionDefs, setPermissionDefs] = useState<PermissionDefinition[]>([]);
 
@@ -291,6 +306,7 @@ export default function AppSidebar() {
         if (nav.name === "Validations") pendingCount = pendingValidationsCount;
         if (nav.name === "Paiements") pendingCount = pendingPaiementsCount;
         if (nav.name === "Réceptions") pendingCount = pendingReceptionsCount;
+        if (nav.name === "Achats") pendingCount = pendingAchatsCount;
         const hasPending = pendingCount > 0;
         const pendingBadgeLabel = pendingCount > 99 ? "99+" : String(pendingCount);
 
@@ -383,6 +399,10 @@ export default function AppSidebar() {
                             {pendingBadgeLabel}
                           </span>
                         ) : sub.path === "/receptions/pending" && pendingReceptionsCount > 0 ? (
+                          <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                            {pendingBadgeLabel}
+                          </span>
+                        ) : sub.path === "/achats/pending" && pendingAchatsCount > 0 ? (
                           <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
                             {pendingBadgeLabel}
                           </span>

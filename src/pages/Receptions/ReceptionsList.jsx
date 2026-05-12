@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiDownload, FiEye, FiFilePlus, FiRefreshCw } from "react-icons/fi";
 import { listReceptions } from "../../services/receptions.service";
@@ -117,7 +117,7 @@ export default function ReceptionsList({ mode = "all" }) {
         const params = {
           page: state.page,
           pageSize: state.pageSize,
-          statut: "approuvee,en_attente_paiement,paye",
+          statut: "approuvee,en_attente_paiement,achat_effectue,paye,payee",
           ...(directionId ? { direction_id: Number(directionId), roleView: "DIRECTION" } : {}),
         };
 
