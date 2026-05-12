@@ -36,6 +36,13 @@ function formatDate(input) {
   return d.toISOString().slice(0, 10);
 }
 
+function displayAcheteur(demande) {
+  const a = demande?.agents_demandes_paiement_acheteur_idToagents;
+  if (!a) return "-";
+  const full = [a?.prenom, a?.nom].filter(Boolean).join(" ").trim();
+  return full || a?.users?.email || "-";
+}
+
 const initialState = {
   filters: { statut: "", beneficiaire: "", dateStart: "", dateEnd: "" },
   page: 1,
@@ -72,7 +79,7 @@ export default function AchatsList({ mode = "all" }) {
       const params = {
         page: state.page,
         pageSize: state.pageSize,
-        assigned_acheteur: 1,
+        achat_pool: 1,
         statut: statutParam,
         ...(state.filters.beneficiaire ? { beneficiaire: state.filters.beneficiaire } : {}),
         ...(state.filters.dateStart ? { dateStart: state.filters.dateStart } : {}),
@@ -159,6 +166,7 @@ export default function AchatsList({ mode = "all" }) {
     { header: "UUID", key: "uuid" },
     { header: "Motif", key: "motif" },
     { header: "Montant", value: (d) => `${formatMoney(d.montant_net ?? d.montant)} FCFA` },
+    { header: "Acheteur", value: (d) => displayAcheteur(d) },
     { header: "Statut", value: (d) => labelDemandeStatut(d.statut) },
     { header: "Beneficiaire", value: (d) => d?.beneficiaire || "-" },
     { header: "Cree", value: (d) => formatDateTime(d.created_at) },
@@ -280,6 +288,7 @@ export default function AchatsList({ mode = "all" }) {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">UUID</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Motif</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Acheteur</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Beneficiaire</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Cree</th>
@@ -292,6 +301,7 @@ export default function AchatsList({ mode = "all" }) {
                     <td className="px-4 py-3 text-sm text-gray-800 dark:text-white/90">{demande.uuid}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>
                     <td className="px-4 py-3 text-sm">{formatMoney(demande.montant_net ?? demande.montant)} FCFA</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{displayAcheteur(demande)}</td>
                     <td className="px-4 py-3 text-sm">
                       <span className={`px-2 py-1 text-xs rounded ${demandeStatusBadgeClass(demande.statut)}`}>
                         {labelDemandeStatut(demande.statut)}
@@ -327,4 +337,3 @@ export default function AchatsList({ mode = "all" }) {
     </div>
   );
 }
-

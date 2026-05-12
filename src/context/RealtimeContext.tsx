@@ -179,7 +179,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       ) {
         setReceptionsTick((t) => t + 1);
       }
-      if (["demande_acheteur_assigne", "demande_acheteur_retire"].includes(type)) {
+      if (["demande_acheteur_assigne", "demande_acheteur_retire", "achat_effectue"].includes(type)) {
         setAchatsTick((t) => t + 1);
       }
       setNotifications((prev) => {

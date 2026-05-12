@@ -97,3 +97,17 @@ export async function assignDemandeAcheteur(idOrUuid, acheteurId) {
   });
   return res.data;
 }
+
+export async function confirmDemandeAchat(idOrUuid, { files = [], type_document = "preuve_achat", commentaire = "" } = {}) {
+  const formData = new FormData();
+  for (const f of files || []) {
+    formData.append("files", f);
+  }
+  formData.append("type_document", type_document);
+  if (commentaire != null && String(commentaire).trim()) {
+    formData.append("commentaire", String(commentaire).trim());
+  }
+
+  const res = await api.post(`/demandes/${idOrUuid}/achat/confirm`, formData);
+  return res.data;
+}

@@ -7,6 +7,7 @@ import {
   getDemandeValidationHistory,
   listAcheteurCandidates,
   assignDemandeAcheteur,
+  confirmDemandeAchat,
 } from "../../services/demandes.services";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
@@ -136,6 +137,11 @@ export default function DemandeDetail() {
   const [uploadType, setUploadType] = useState("devis_proforma");
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
+  const [achatSubmitting, setAchatSubmitting] = useState(false);
+  const [achatError, setAchatError] = useState("");
+  const [achatType, setAchatType] = useState("preuve_achat");
+  const [achatCommentaire, setAchatCommentaire] = useState("");
+  const [achatFiles, setAchatFiles] = useState([]);
   const [acheteurCandidates, setAcheteurCandidates] = useState([]);
   const [acheteurLoading, setAcheteurLoading] = useState(false);
   const [acheteurSaving, setAcheteurSaving] = useState(false);
@@ -391,6 +397,24 @@ export default function DemandeDetail() {
   const hasAnyPaiement = (demande?.paiements || []).length > 0;
   const receptionNeedsAchatStatus = demande?.acheteur_id != null;
   const canAssignAcheteur = canAssignAcheteurPerm && !isClosed && hasAnyPaiement;
+  const hasAchatMenuPermission = hasPermission("DEMANDE_LIST_ASSIGNED_ACHETEUR");
+  const isSameDirectionAcheteur =
+    user?.agent?.direction_id != null &&
+    demande?.direction_id != null &&
+    Number(user.agent.direction_id) === Number(demande.direction_id);
+  const achatIsPending = ["en_attente_paiement", "paye", "payee"].includes(statutLower);
+  const achatHandledByOther =
+    hasAchatMenuPermission &&
+    demande?.acheteur_id != null &&
+    !isAssignedAcheteur &&
+    statutLower === "achat_effectue";
+  const canConfirmAchat =
+    hasAchatMenuPermission &&
+    isSameDirectionAcheteur &&
+    achatIsPending &&
+    (demande?.acheteur_id == null || isAssignedAcheteur) &&
+    !isClosed &&
+    !isRejected;
 
   const canCancel = canDeleteDemande && (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
   const canClose =
@@ -427,6 +451,48 @@ export default function DemandeDetail() {
     setUploadType("preuve_achat");
     setUploadTypeAutre("");
   }, [isAssignedAcheteur, uploadType]);
+
+  const handleAchatFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    const { accepted, rejected } = splitFilesBySize(files);
+    if (rejected.length) {
+      emitToast({
+        variant: "error",
+        title: "Fichier trop volumineux",
+        message: buildFileTooLargeMessage(rejected),
+        timeoutMs: 7000,
+      });
+    }
+    setAchatFiles(accepted);
+    if (!accepted.length) e.target.value = "";
+  };
+
+  const doConfirmAchat = async () => {
+    if (!demande?.uuid || !canConfirmAchat) return;
+    setAchatError("");
+    try {
+      if (!achatFiles.length) throw new Error("Veuillez joindre au moins une preuve d'achat");
+      setAchatSubmitting(true);
+      const res = await confirmDemandeAchat(demande.uuid, {
+        files: achatFiles,
+        type_document: achatType,
+        commentaire: achatCommentaire,
+      });
+      if (!res?.success) throw new Error(res?.message || "Confirmation achat impossible");
+      setAchatFiles([]);
+      setAchatCommentaire("");
+      setAchatType("preuve_achat");
+      emitToast("Achat confirmé avec succès", "success");
+      await fetchDemande();
+      if (demande?.id) await fetchDocs(demande.id);
+    } catch (e) {
+      const msg = e?.message || "Erreur confirmation achat";
+      setAchatError(msg);
+      emitToast(msg, "error");
+    } finally {
+      setAchatSubmitting(false);
+    }
+  };
 
   const doUpload = async () => {
     if (!demande?.id) return;
@@ -1290,6 +1356,81 @@ export default function DemandeDetail() {
                   </tfoot>
                 </table>
               </div>
+            </div>
+          ) : null}
+
+          {hasAchatMenuPermission && isSameDirectionAcheteur ? (
+            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Procéder à l'achat</div>
+              {achatError ? (
+                <div className="mt-2 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                  {achatError}
+                </div>
+              ) : null}
+
+              {canConfirmAchat ? (
+                <>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                      <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Type de preuve</div>
+                      <select
+                        value={achatType}
+                        onChange={(e) => setAchatType(e.target.value)}
+                        disabled={achatSubmitting}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60"
+                      >
+                        <option value="preuve_achat">Preuve d'achat</option>
+                        <option value="facture">Facture finale</option>
+                        <option value="bon_livraison">Bon de livraison</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire (optionnel)</div>
+                      <input
+                        value={achatCommentaire}
+                        onChange={(e) => setAchatCommentaire(e.target.value)}
+                        disabled={achatSubmitting}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60"
+                        placeholder="Ex: achat validé, pièces jointes complètes"
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Pièces justificatives</div>
+                      <input
+                        type="file"
+                        multiple
+                        onChange={handleAchatFilesChange}
+                        disabled={achatSubmitting}
+                        className="w-full text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={achatSubmitting || !achatFiles.length}
+                      onClick={doConfirmAchat}
+                      title={achatSubmitting ? "Confirmation..." : "Confirmer achat"}
+                      aria-label={achatSubmitting ? "Confirmation..." : "Confirmer achat"}
+                      className={`inline-flex items-center justify-center p-2 rounded-lg ${
+                        achatSubmitting || !achatFiles.length
+                          ? "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
+                          : "bg-emerald-600 text-white hover:opacity-90"
+                      }`}
+                    >
+                      {achatSubmitting ? <Loader inline size="sm" label="" /> : <FiCheckCircle />}
+                    </button>
+                  </div>
+                </>
+              ) : achatHandledByOther ? (
+                <div className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+                  Achat déjà confirmé par {agentDisplayName(assignedAcheteur)}. Vous ne pouvez plus agir sur cette demande.
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  Cette demande n'est pas en attente d'achat.
+                </div>
+              )}
             </div>
           ) : null}
 
