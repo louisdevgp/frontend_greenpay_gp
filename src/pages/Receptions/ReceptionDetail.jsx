@@ -108,7 +108,8 @@ export default function ReceptionDetail() {
   const [error, setError] = useState("");
   const [reception, setReception] = useState(null);
 
-  const hasAllVisas = !!reception?.visa_directeur_id && !!reception?.visa_daf_id;
+  const isDafRequired = reception?.visa_daf_requis !== false;
+  const hasAllVisas = !!reception?.visa_directeur_id && (!isDafRequired || !!reception?.visa_daf_id);
   const canDownloadPdf = canListReceptions && hasAllVisas;
 
   const visaDirecteurAuto =
@@ -122,7 +123,9 @@ export default function ReceptionDetail() {
     : "Non";
   const visaDafValue = reception?.visa_daf_id
     ? `Oui${reception.visa_daf_nom ? ` (${reception.visa_daf_nom})` : ""}${visaDafDelegated ? " (Délégué)" : ""}`
-    : "Non";
+    : isDafRequired
+      ? "Non"
+      : "Non requis";
 
   const [docsLoading, setDocsLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
@@ -152,6 +155,7 @@ export default function ReceptionDetail() {
   const [visaKind, setVisaKind] = useState(null); // "directeur" | "daf" | null
   // On n'utilise plus les signatures
   const [visaCommentaire, setVisaCommentaire] = useState("");
+  const [visaDafRequisChoice, setVisaDafRequisChoice] = useState(true);
   const [visaModalError, setVisaModalError] = useState("");
   const [signatureUrl, setSignatureUrl] = useState("");
   const [signatureSessionId, setSignatureSessionId] = useState("");
@@ -212,22 +216,26 @@ export default function ReceptionDetail() {
     canVisaDafPerm &&
     (roles.includes("DAF") || roles.includes("ADMIN")) &&
     !!reception?.visa_directeur_id &&
+    isDafRequired &&
     !reception?.visa_daf_id;
 
-  const startVisaSignature = async (kind, commentaire) => {
+  const startVisaSignature = async (kind, commentaire, directeurVisaDafRequis = true) => {
     if (!reception?.id) return;
     setVisaError("");
     try {
       setVisaLoading(true);
       const commentaireTrimmed = (commentaire || "").trim();
       const payload = commentaireTrimmed ? { commentaire: commentaireTrimmed } : {};
+      if (kind === "directeur") payload.visa_daf_requis = Boolean(directeurVisaDafRequis);
 
       if (!FIRMA_ENABLED) {
         const res = kind === "directeur" ? await visaDirecteur(reception.id, payload) : await visaDaf(reception.id, payload);
         if (!res?.success) throw new Error(res?.message || "Visa impossible");
         await fetchReception();
         emitToast({ variant: "success", message: kind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
-        if (kind === "daf") {
+        const shouldDownloadPdf =
+          kind === "daf" || (kind === "directeur" && res?.data?.visa_daf_requis === false);
+        if (shouldDownloadPdf) {
           const targetUuid = res?.data?.uuid || reception?.uuid || uuid;
           if (targetUuid) {
             downloadFile(`/receptions/${targetUuid}/pdf`, `reception_${targetUuid}.pdf`);
@@ -281,7 +289,9 @@ export default function ReceptionDetail() {
 
       await fetchReception();
       emitToast({ variant: "success", message: visaKind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
-      if (visaKind === "daf") {
+      const shouldDownloadPdf =
+        visaKind === "daf" || (visaKind === "directeur" && res?.data?.visa_daf_requis === false);
+      if (shouldDownloadPdf) {
         const targetUuid = res?.data?.uuid || reception?.uuid || uuid;
         if (targetUuid) {
           downloadFile(`/receptions/${targetUuid}/pdf`, `reception_${targetUuid}.pdf`);
@@ -301,6 +311,7 @@ export default function ReceptionDetail() {
     setVisaModalError("");
     setVisaKind(kind);
     setVisaCommentaire("");
+    setVisaDafRequisChoice(reception?.visa_daf_requis !== false);
     setSignatureUrl("");
     setSignatureSessionId("");
     setSignatureRequestId("");
@@ -314,6 +325,7 @@ export default function ReceptionDetail() {
     setVisaModalOpen(false);
     setVisaKind(null);
     setVisaCommentaire("");
+    setVisaDafRequisChoice(true);
     setVisaModalError("");
     setSignatureUrl("");
     setSignatureSessionId("");
@@ -326,7 +338,7 @@ export default function ReceptionDetail() {
     setVisaModalError("");
     try {
       if (!visaKind) throw new Error("Type de visa invalide");
-      await startVisaSignature(visaKind, visaCommentaire);
+      await startVisaSignature(visaKind, visaCommentaire, visaDafRequisChoice);
     } catch (e) {
       setVisaModalError(e?.message || "Erreur visa");
     }
@@ -428,6 +440,36 @@ export default function ReceptionDetail() {
                 placeholder="Optionnel"
               />
             </div>
+
+            {visaKind === "directeur" ? (
+              <div className="mt-4">
+                <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Visa DAF requis ?</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisaDafRequisChoice(true)}
+                    className={`px-3 py-2 text-sm rounded-lg border ${
+                      visaDafRequisChoice
+                        ? "bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white"
+                        : "border-gray-200 text-gray-700 dark:border-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    Oui
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisaDafRequisChoice(false)}
+                    className={`px-3 py-2 text-sm rounded-lg border ${
+                      !visaDafRequisChoice
+                        ? "bg-gray-900 text-white border-gray-900 dark:bg-white dark:text-gray-900 dark:border-white"
+                        : "border-gray-200 text-gray-700 dark:border-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    Non
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -544,6 +586,7 @@ export default function ReceptionDetail() {
             <Info label="Conforme" value={reception.conforme ? "Oui" : "Non"} />
             <Info label="Visa Directeur" value={visaDirecteurValue} />
             <Info label="Visa DAF" value={visaDafValue} />
+            <Info label="DAF requis" value={isDafRequired ? "Oui" : "Non"} />
           </div>
 
           <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">

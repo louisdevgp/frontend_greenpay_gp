@@ -22,6 +22,13 @@ function isPayableStatus(statut) {
   return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
 }
 
+function normalizeConditionSource(value) {
+  const v = String(value || "").trim().toUpperCase();
+  if (v === "DAF") return "DAF";
+  if (v === "DEMANDEUR") return "DEMANDEUR";
+  return "";
+}
+
 function isConditionPaid(condition) {
   if (!condition) return false;
   if (condition.paiement_id) return true;
@@ -29,10 +36,23 @@ function isConditionPaid(condition) {
   return PAID_CONDITION_STATUSES.has(statusKey);
 }
 
+function resolveEffectiveConditionSource(conditions = []) {
+  const paid = (conditions || []).find((c) => isConditionPaid(c) && normalizeConditionSource(c?.source));
+  if (paid) return normalizeConditionSource(paid?.source);
+  if ((conditions || []).some((c) => normalizeConditionSource(c?.source) === "DAF")) return "DAF";
+  if ((conditions || []).some((c) => normalizeConditionSource(c?.source) === "DEMANDEUR")) return "DEMANDEUR";
+  return "";
+}
+
 function isFullyPaid(demande) {
-  const conditions = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
-  if (!conditions.length) return false;
-  return conditions.every(isConditionPaid);
+  const all = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
+  if (!all.length) return false;
+  const effectiveSource = resolveEffectiveConditionSource(all);
+  const scoped = effectiveSource
+    ? all.filter((c) => normalizeConditionSource(c?.source) === effectiveSource)
+    : all;
+  if (!scoped.length) return false;
+  return scoped.every(isConditionPaid);
 }
 
 function formatDate(input) {

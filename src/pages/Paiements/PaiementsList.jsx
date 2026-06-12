@@ -22,6 +22,10 @@ function formatDate(input) {
   return d.toISOString().slice(0, 10);
 }
 
+function paiementBeneficiaire(paiement) {
+  return paiement?.beneficiaire || paiement?.demandes_paiement?.beneficiaire || "-";
+}
+
 const initialState = {
   filters: { beneficiaire: "", dateStart: "", dateEnd: "" },
   page: 1,
@@ -78,7 +82,7 @@ export default function PaiementsList() {
   useEffect(() => {
     if (state.filters.beneficiaire || state.filters.dateStart || state.filters.dateEnd) {
       const filtered = (data || []).filter((p) => {
-        if (state.filters.beneficiaire && !String(p.beneficiaire || "").toLowerCase().includes(String(state.filters.beneficiaire).toLowerCase()))
+        if (state.filters.beneficiaire && !String(paiementBeneficiaire(p)).toLowerCase().includes(String(state.filters.beneficiaire).toLowerCase()))
           return false;
         if (state.filters.dateStart && new Date(p.created_at) < new Date(parseDateOnlyStart(state.filters.dateStart))) return false;
         if (state.filters.dateEnd && new Date(p.created_at) > new Date(parseDateOnlyEnd(state.filters.dateEnd))) return false;
@@ -121,7 +125,7 @@ export default function PaiementsList() {
     { header: "Type", value: (p) => p?.type_paiement || "-" },
     { header: "Moyen", value: (p) => p?.moyen_paiement || "-" },
     { header: "Montant", value: (p) => `${formatMoney(p?.montant)} FCFA` },
-    { header: "Bénéficiaire", value: (p) => p?.beneficiaire || "-" },
+    { header: "Bénéficiaire", value: (p) => paiementBeneficiaire(p) },
     { header: "Créé", value: (p) => formatDateTime(p?.created_at) },
   ];
   const handleExport = () => {
@@ -238,7 +242,7 @@ export default function PaiementsList() {
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiement.type_paiement}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiement.moyen_paiement || "-"}</td>
                     <td className="px-4 py-3 text-sm">{formatMoney(paiement.montant)} FCFA</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiement.beneficiaire}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{paiementBeneficiaire(paiement)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(paiement.created_at)}</td>
                     <td className="px-4 py-3 text-sm">
                       {canViewDetails ? (

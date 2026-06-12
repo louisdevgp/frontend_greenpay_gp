@@ -11,7 +11,7 @@ import {
 } from "../../services/demandes.services";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
-import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
+import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiPlus, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
 import CreateReceptionModal from "../Receptions/CreateReceptionModal";
 import ValidationActionModal from "../Validations/ValidationActionModal";
@@ -24,9 +24,11 @@ import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { agentDisplayName, validationActorLabel, isDelegatedValidation } from "../../utils/validationActors";
 import Loader from "../../components/common/Loader";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
+import DocumentFileIcon from "../../components/common/DocumentFileIcon";
 
 const DAF_CRITERE4_LABEL = "Moyen de paiement";
 const ACHETEUR_ALLOWED_UPLOAD_TYPES = new Set(["preuve_achat", "facture", "bon_livraison"]);
+const MAX_ACHAT_FILES = 10;
 
 function normalizeUploadType(value) {
   return String(value || "").trim().toLowerCase();
@@ -35,6 +37,27 @@ function normalizeUploadType(value) {
 function isAcheteurAllowedUploadType(typeDocument) {
   const normalized = normalizeUploadType(typeDocument);
   return ACHETEUR_ALLOWED_UPLOAD_TYPES.has(normalized);
+}
+
+function buildAchatTypeDocument(type, autreValue = "") {
+  const normalized = normalizeUploadType(type);
+  if (normalized === "autre") {
+    const details = String(autreValue || "").trim();
+    return details ? `preuve_achat:${details}` : "";
+  }
+  return normalized;
+}
+
+function labelAchatType(typeDocument) {
+  const normalized = normalizeUploadType(typeDocument);
+  if (normalized === "preuve_achat") return "Preuve d'achat";
+  if (normalized === "facture") return "Facture finale";
+  if (normalized === "bon_livraison") return "Bon de livraison";
+  if (normalized.startsWith("preuve_achat:")) {
+    const details = String(typeDocument).slice("preuve_achat:".length).trim();
+    return details ? `Autre (${details})` : "Autre";
+  }
+  return typeDocument || "-";
 }
 
 function parseBooleanLike(value) {
@@ -140,6 +163,7 @@ export default function DemandeDetail() {
   const [achatSubmitting, setAchatSubmitting] = useState(false);
   const [achatError, setAchatError] = useState("");
   const [achatType, setAchatType] = useState("preuve_achat");
+  const [achatTypeAutre, setAchatTypeAutre] = useState("");
   const [achatCommentaire, setAchatCommentaire] = useState("");
   const [achatFiles, setAchatFiles] = useState([]);
   const [acheteurCandidates, setAcheteurCandidates] = useState([]);
@@ -148,6 +172,7 @@ export default function DemandeDetail() {
   const [acheteurDraft, setAcheteurDraft] = useState("");
   const [acheteurError, setAcheteurError] = useState("");
   const [downloadState, setDownloadState] = useState({});
+  const achatFilesInputRef = useRef(null);
 
   const isDownloading = (key) => !!downloadState[key];
   const runDownload = async (key, fn) => {
@@ -276,7 +301,7 @@ export default function DemandeDetail() {
   const isClosed = useMemo(() => ["cloture", "cloturee"].includes(statutLower), [statutLower]);
   const isRejected = useMemo(() => ["rejete", "rejetee"].includes(statutLower), [statutLower]);
   const statutEligibleForReception = useMemo(
-    () => ["approuvee", "en_attente_paiement", "achat_effectue", "paye", "payee"].includes(statutLower),
+    () => ["approuvee", "achat_effectue"].includes(statutLower),
     [statutLower]
   );
   const isPaidStatut = useMemo(() => ["paye", "payee"].includes(statutLower), [statutLower]);
@@ -395,8 +420,12 @@ export default function DemandeDetail() {
   );
   const hasReception = receptions.length > 0;
   const hasAnyPaiement = (demande?.paiements || []).length > 0;
-  const receptionNeedsAchatStatus = demande?.acheteur_id != null;
-  const canAssignAcheteur = canAssignAcheteurPerm && !isClosed && hasAnyPaiement;
+  const receptionBlockedByAchat = ["en_attente_paiement", "paye", "payee"].includes(statutLower);
+  const achatAssignmentLocked = useMemo(
+    () => ["achat_effectue", "receptionnee", "cloture", "cloturee"].includes(statutLower),
+    [statutLower]
+  );
+  const canAssignAcheteur = canAssignAcheteurPerm && !isClosed && hasAnyPaiement && !achatAssignmentLocked;
   const hasAchatMenuPermission = hasPermission("DEMANDE_LIST_ASSIGNED_ACHETEUR");
   const isSameDirectionAcheteur =
     user?.agent?.direction_id != null &&
@@ -417,17 +446,20 @@ export default function DemandeDetail() {
     !isRejected;
 
   const canCancel = canDeleteDemande && (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
-  const canClose =
-    canCloseDemande &&
-    (isOwner || isAdmin) &&
-    !isClosed &&
-    (hasReception || ["receptionnee", "paye", "payee"].includes(statutLower));
+  const hasFinalReception = useMemo(
+    () =>
+      receptions.some(
+        (r) => Boolean(r?.visa_directeur_id) && (r?.visa_daf_requis === false || Boolean(r?.visa_daf_id))
+      ),
+    [receptions]
+  );
+  const canClose = canCloseDemande && (isOwner || isAdmin) && !isClosed && hasFinalReception;
   const canCreateReception =
     canCreateReceptionPerm &&
     (isOwner || isAssignedAcheteur) &&
     allValidationsApproved &&
     statutEligibleForReception &&
-    (!receptionNeedsAchatStatus || statutLower === "achat_effectue") &&
+    !receptionBlockedByAchat &&
     !isClosed &&
     !isRejected &&
     !(hasReceptionBefore && hasReceptionAfter) &&
@@ -455,6 +487,15 @@ export default function DemandeDetail() {
   const handleAchatFilesChange = (e) => {
     const files = Array.from(e.target.files || []);
     const { accepted, rejected } = splitFilesBySize(files);
+    const typeDocument = buildAchatTypeDocument(achatType, achatTypeAutre);
+    if (!typeDocument) {
+      emitToast({
+        variant: "error",
+        message: "Veuillez préciser le type de preuve (Autre) avant d'ajouter des fichiers.",
+      });
+      e.target.value = "";
+      return;
+    }
     if (rejected.length) {
       emitToast({
         variant: "error",
@@ -463,8 +504,33 @@ export default function DemandeDetail() {
         timeoutMs: 7000,
       });
     }
-    setAchatFiles(accepted);
-    if (!accepted.length) e.target.value = "";
+    setAchatFiles((prev) => {
+      const map = new Map();
+      const incoming = accepted.map((file) => ({ file, type_document: typeDocument }));
+      for (const item of [...prev, ...incoming]) {
+        const key = `${item?.file?.name || ""}_${item?.file?.size || 0}_${item?.file?.lastModified || 0}_${item?.type_document || ""}`;
+        if (!map.has(key)) map.set(key, item);
+      }
+      const merged = Array.from(map.values());
+      if (merged.length > MAX_ACHAT_FILES) {
+        emitToast({
+          variant: "warning",
+          message: `Maximum ${MAX_ACHAT_FILES} pièces pour l'achat.`,
+        });
+        return merged.slice(0, MAX_ACHAT_FILES);
+      }
+      return merged;
+    });
+    e.target.value = "";
+  };
+
+  const openAchatFilesPicker = () => {
+    if (achatSubmitting) return;
+    achatFilesInputRef.current?.click();
+  };
+
+  const removeAchatFile = (index) => {
+    setAchatFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const doConfirmAchat = async () => {
@@ -474,14 +540,16 @@ export default function DemandeDetail() {
       if (!achatFiles.length) throw new Error("Veuillez joindre au moins une preuve d'achat");
       setAchatSubmitting(true);
       const res = await confirmDemandeAchat(demande.uuid, {
-        files: achatFiles,
-        type_document: achatType,
+        files: achatFiles.map((item) => item.file),
+        type_documents: achatFiles.map((item) => item.type_document),
         commentaire: achatCommentaire,
       });
       if (!res?.success) throw new Error(res?.message || "Confirmation achat impossible");
       setAchatFiles([]);
+      if (achatFilesInputRef.current) achatFilesInputRef.current.value = "";
       setAchatCommentaire("");
       setAchatType("preuve_achat");
+      setAchatTypeAutre("");
       emitToast("Achat confirmé avec succès", "success");
       await fetchDemande();
       if (demande?.id) await fetchDocs(demande.id);
@@ -1375,14 +1443,29 @@ export default function DemandeDetail() {
                       <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Type de preuve</div>
                       <select
                         value={achatType}
-                        onChange={(e) => setAchatType(e.target.value)}
+                        onChange={(e) => {
+                          setAchatType(e.target.value);
+                          if (e.target.value !== "autre") setAchatTypeAutre("");
+                        }}
                         disabled={achatSubmitting}
                         className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60"
                       >
                         <option value="preuve_achat">Preuve d'achat</option>
                         <option value="facture">Facture finale</option>
                         <option value="bon_livraison">Bon de livraison</option>
+                        <option value="autre">Autre</option>
                       </select>
+                      {achatType === "autre" ? (
+                        <div className="mt-2">
+                          <input
+                            value={achatTypeAutre}
+                            onChange={(e) => setAchatTypeAutre(e.target.value)}
+                            disabled={achatSubmitting}
+                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60"
+                            placeholder="Préciser le type de preuve"
+                          />
+                        </div>
+                      ) : null}
                     </div>
                     <div className="sm:col-span-2">
                       <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Commentaire (optionnel)</div>
@@ -1395,14 +1478,64 @@ export default function DemandeDetail() {
                       />
                     </div>
                     <div className="sm:col-span-3">
-                      <div className="mb-1 text-xs text-gray-500 dark:text-gray-400">Pièces justificatives</div>
+                      <div className="mb-1 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                        <span>Pièces justificatives ({achatFiles.length}/{MAX_ACHAT_FILES})</span>
+                        <button
+                          type="button"
+                          onClick={openAchatFilesPicker}
+                          disabled={achatSubmitting || achatFiles.length >= MAX_ACHAT_FILES}
+                          title="Ajouter une preuve"
+                          aria-label="Ajouter une preuve"
+                          className={`inline-flex items-center justify-center p-1.5 rounded-lg border ${
+                            achatSubmitting || achatFiles.length >= MAX_ACHAT_FILES
+                              ? "border-gray-200 text-gray-400 cursor-not-allowed dark:border-gray-800 dark:text-gray-600"
+                              : "border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-950"
+                          }`}
+                        >
+                          <FiPlus />
+                        </button>
+                      </div>
                       <input
+                        ref={achatFilesInputRef}
                         type="file"
                         multiple
                         onChange={handleAchatFilesChange}
                         disabled={achatSubmitting}
-                        className="w-full text-sm"
+                        className="hidden"
                       />
+                      {achatFiles.length ? (
+                        <div className="space-y-2">
+                          {achatFiles.map((item, idx) => (
+                            <div
+                              key={`${item?.file?.name || "file"}_${item?.file?.size || 0}_${item?.file?.lastModified || idx}_${item?.type_document || ""}`}
+                              className="flex items-center justify-between gap-2 px-3 py-2 text-xs border border-gray-200 rounded-lg dark:border-gray-800"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-gray-700 dark:text-gray-200">
+                                  {item?.file?.name || `Fichier ${idx + 1}`}
+                                </div>
+                                <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {labelAchatType(item?.type_document)}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeAchatFile(idx)}
+                                disabled={achatSubmitting}
+                                title="Retirer"
+                                aria-label="Retirer"
+                                className="inline-flex items-center justify-center p-1 rounded text-red-600 hover:bg-red-50 disabled:opacity-60 dark:text-red-300 dark:hover:bg-red-500/10"
+                              >
+                                <FiXCircle />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2 text-xs text-gray-500 border border-dashed border-gray-200 rounded-lg dark:border-gray-800 dark:text-gray-400">
+                          Aucune pièce ajoutée.
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="mt-3 flex justify-end">
@@ -1535,7 +1668,7 @@ export default function DemandeDetail() {
             ) : documents.length === 0 ? (
               <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
             ) : (
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {documents.map((doc) => (
                   <button
                     key={doc.id}
@@ -1543,13 +1676,14 @@ export default function DemandeDetail() {
                     onClick={() =>
                       downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
                     }
-                    className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                    className="flex h-full w-full items-center gap-3 p-3 text-left text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                   >
-                    <div>
+                    <DocumentFileIcon fileName={doc.nom_fichier} format={doc.format} url={doc.url} />
+                    <div className="min-w-0 flex-1">
                       <div className="font-medium">{doc.type_document || "document"}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                      <div className="truncate text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</div>
                     </div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
                   </button>
                 ))}
               </div>

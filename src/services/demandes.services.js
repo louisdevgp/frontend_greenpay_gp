@@ -98,12 +98,21 @@ export async function assignDemandeAcheteur(idOrUuid, acheteurId) {
   return res.data;
 }
 
-export async function confirmDemandeAchat(idOrUuid, { files = [], type_document = "preuve_achat", commentaire = "" } = {}) {
+export async function confirmDemandeAchat(
+  idOrUuid,
+  { files = [], type_document = "preuve_achat", type_documents = [], commentaire = "" } = {}
+) {
   const formData = new FormData();
   for (const f of files || []) {
     formData.append("files", f);
   }
-  formData.append("type_document", type_document);
+  if (Array.isArray(type_documents) && type_documents.length) {
+    for (const t of type_documents) {
+      formData.append("type_documents", String(t || ""));
+    }
+  } else {
+    formData.append("type_document", type_document);
+  }
   if (commentaire != null && String(commentaire).trim()) {
     formData.append("commentaire", String(commentaire).trim());
   }

@@ -24,9 +24,43 @@ function normalizeConditionSource(value) {
 }
 
 const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "achat_effectue", "receptionnee"]);
+const PAID_CONDITION_STATUSES = new Set(["paye", "payee", "regle", "reglee"]);
 
 function isPayableStatus(statut) {
   return PAYABLE_STATUSES.has(String(statut || "").toLowerCase());
+}
+
+function normalizeConditionSourceForFilter(value) {
+  const v = String(value || "").trim().toUpperCase();
+  if (v === "DAF") return "DAF";
+  if (v === "DEMANDEUR") return "DEMANDEUR";
+  return "";
+}
+
+function isConditionPaid(condition) {
+  if (!condition) return false;
+  if (condition.paiement_id) return true;
+  const statusKey = String(condition.statut || "").toLowerCase();
+  return PAID_CONDITION_STATUSES.has(statusKey);
+}
+
+function resolveEffectiveConditionSource(conditions = []) {
+  const paid = (conditions || []).find((c) => isConditionPaid(c) && normalizeConditionSourceForFilter(c?.source));
+  if (paid) return normalizeConditionSourceForFilter(paid?.source);
+  if ((conditions || []).some((c) => normalizeConditionSourceForFilter(c?.source) === "DAF")) return "DAF";
+  if ((conditions || []).some((c) => normalizeConditionSourceForFilter(c?.source) === "DEMANDEUR")) return "DEMANDEUR";
+  return "";
+}
+
+function isFullyPaid(demande) {
+  const all = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
+  if (!all.length) return false;
+  const effectiveSource = resolveEffectiveConditionSource(all);
+  const scoped = effectiveSource
+    ? all.filter((c) => normalizeConditionSourceForFilter(c?.source) === effectiveSource)
+    : all;
+  if (!scoped.length) return false;
+  return scoped.every(isConditionPaid);
 }
 
 export default function CreatePaiementModal({ open, onClose, onCreated, defaultDemandeId = "" }) {
@@ -58,7 +92,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     try {
       const res = await listAllDemandes({ statut: "approuvee,en_attente_paiement,achat_effectue,receptionnee" });
       if (res?.success) {
-        const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut));
+        const rows = (res.data || []).filter((d) => isPayableStatus(d?.statut) && !isFullyPaid(d));
         setDemandes(rows);
       } else {
         setDemandes([]);
@@ -276,7 +310,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
 
   const lockedSource = useMemo(() => {
     const list = demandeResolved?.conditions_paiement || [];
-    const paid = list.find((c) => c?.paiement_id);
+    const paid = list.find((c) => isConditionPaid(c));
     return paid ? normalizeConditionSource(paid?.source) : "";
   }, [demandeResolved?.conditions_paiement]);
 
@@ -301,7 +335,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
   const unpaid = useMemo(() => {
     if (!conditionsForSource?.length) return [];
     return (conditionsForSource || [])
-      .filter((c) => !c.paiement_id) // Non payees
+      .filter((c) => !isConditionPaid(c)) // Non payees
       .map((c) => ({ ...c, montant_prevu: Number(c.montant_prevu) }))
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); // Tri par date
   }, [conditionsForSource]);

@@ -75,7 +75,9 @@ export default function AchatsList({ mode = "all" }) {
     setError("");
     try {
       const defaultStatuts = Array.from(modeStatusSet).join(",");
-      const statutParam = state.filters.statut ? state.filters.statut : defaultStatuts;
+      const selectedStatut = String(state.filters.statut || "").trim().toLowerCase();
+      const hasCompatibleSelectedStatut = selectedStatut ? modeStatusSet.has(selectedStatut) : false;
+      const statutParam = hasCompatibleSelectedStatut ? selectedStatut : defaultStatuts;
       const params = {
         page: state.page,
         pageSize: state.pageSize,
@@ -221,9 +223,9 @@ export default function AchatsList({ mode = "all" }) {
               <option value="">Tous</option>
               <option value="en_attente_paiement">En attente de paiement</option>
               <option value="paye">Payee</option>
-              <option value="achat_effectue">Achat effectue</option>
-              <option value="receptionnee">Receptionnee</option>
-              <option value="cloture">Cloturee</option>
+              {(modeKey === "done" || modeKey === "all") ? <option value="achat_effectue">Achat effectue</option> : null}
+              {(modeKey === "done" || modeKey === "all") ? <option value="receptionnee">Receptionnee</option> : null}
+              {(modeKey === "done" || modeKey === "all") ? <option value="cloture">Cloturee</option> : null}
             </select>
           </div>
 

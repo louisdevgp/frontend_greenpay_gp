@@ -102,8 +102,9 @@ export default function ReceptionsList({ mode = "all" }) {
   }, [storageKey]);
 
   const isDirectorOnlyView = effectiveRoles.has("DIRECTEUR") && !effectiveRoles.has("DAF");
-  const isDoneForDaf = (r) => !!r?.visa_daf_id;
-  const isPendingForDaf = (r) => !!r?.visa_directeur_id && !r?.visa_daf_id;
+  const isDafRequired = (r) => r?.visa_daf_requis !== false;
+  const isDoneForDaf = (r) => !!r?.visa_directeur_id && (!isDafRequired(r) || !!r?.visa_daf_id);
+  const isPendingForDaf = (r) => !!r?.visa_directeur_id && isDafRequired(r) && !r?.visa_daf_id;
   const isPendingForDirector = (r) => !r?.visa_directeur_id;
   const canShowDemandes = modeKey === "pending" && isDirectorOnlyView;
   const [pendingView, setPendingView] = useState("receptions");
@@ -267,7 +268,7 @@ export default function ReceptionsList({ mode = "all" }) {
     { header: "Phase", value: (r) => formatPhase(r.phase) },
     { header: "Conforme", value: (r) => (r.conforme ? "Oui" : "Non") },
     { header: "Visa Directeur", value: (r) => (r.visa_directeur_id ? "Oui" : "Non") },
-    { header: "Visa DAF", value: (r) => (r.visa_daf_id ? "Oui" : "Non") },
+    { header: "Visa DAF", value: (r) => (r.visa_daf_requis === false ? "Non requis" : r.visa_daf_id ? "Oui" : "Non") },
   ];
   const handleExport = () => {
     const dateTag = new Date().toISOString().slice(0, 10);
@@ -465,7 +466,7 @@ export default function ReceptionsList({ mode = "all" }) {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
                   {paged.map((reception) => {
-                    const canDownloadRow = modeKey === "done" && reception.visa_daf_id && canDownloadPdf;
+                    const canDownloadRow = modeKey === "done" && isDoneForDaf(reception) && canDownloadPdf;
                     const showActions = canDownloadRow || canViewReceptionDetails;
                     return (
                     <tr key={reception.id}>
@@ -514,6 +515,10 @@ export default function ReceptionsList({ mode = "all" }) {
                               </span>
                             ) : null}
                           </div>
+                        ) : reception.visa_daf_requis === false ? (
+                          <span className="px-2 py-1 text-xs rounded bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-200">
+                            Non requis
+                          </span>
                         ) : (
                           <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200">
                             Non

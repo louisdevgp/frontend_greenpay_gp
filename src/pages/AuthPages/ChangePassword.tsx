@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import PageMeta from "../../components/common/PageMeta";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -10,7 +10,6 @@ import Button from "../../components/ui/button/Button";
 import { changePassword as apiChangePassword } from "../../services/auth.service";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { setAuth } from "../../services/auth.service";
-import { consumePostLoginRedirect, getRedirectFromSearch, setPostLoginRedirect } from "../../utils/postLoginRedirect";
 
 function getErrorMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
@@ -23,7 +22,6 @@ function getErrorMessage(err: unknown, fallback: string) {
 
 export default function ChangePassword() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { auth, refreshMe } = useAuth();
 
   const [oldPassword, setOldPassword] = useState("");
@@ -66,12 +64,7 @@ export default function ChangePassword() {
       setAuth(next);
       await refreshMe();
 
-      const redirectFromQuery = getRedirectFromSearch(location.search);
-      if (redirectFromQuery) {
-        setPostLoginRedirect(redirectFromQuery);
-      }
-      const redirectTarget = consumePostLoginRedirect("/");
-      navigate(redirectTarget, { replace: true });
+      navigate("/", { replace: true });
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err, "Impossible de changer le mot de passe."));
     } finally {

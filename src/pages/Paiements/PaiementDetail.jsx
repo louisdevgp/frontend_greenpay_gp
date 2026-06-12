@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { FiArrowLeft, FiDownload, FiEye, FiRefreshCw } from "react-icons/fi";
+import { FiArrowLeft, FiDownload, FiRefreshCw } from "react-icons/fi";
 import { getPaiement } from "../../services/paiements.service";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
@@ -71,12 +71,20 @@ export default function PaiementDetail() {
   const canViewDemandeDetails = hasAnyPermission([
     "DEMANDE_LIST",
     "DEMANDE_LIST_SELF",
+    "DEMANDE_LIST_ASSIGNED_ACHETEUR",
     "VALIDATION_LIST_PENDING",
     "VALIDATION_LIST_DONE",
   ]);
-  const comptableLabel = paiement?.comptable_nom
-    ? `${paiement.comptable_nom}${paiement.paiement_delegated ? " (Délégué)" : ""}`
+  const comptableName = `${paiement?.agents?.users?.prenom || ""} ${paiement?.agents?.users?.nom || ""}`.trim();
+  const comptableFallback = String(paiement?.comptable_nom || "").trim();
+  const comptableFallbackIsEmail = comptableFallback.includes("@");
+  const comptableBaseLabel =
+    comptableName || (comptableFallback && !comptableFallbackIsEmail ? comptableFallback : "");
+  const comptableLabel = comptableBaseLabel
+    ? `${comptableBaseLabel}${paiement.paiement_delegated ? " (Délégué)" : ""}`
     : "-";
+  const beneficiaireLabel = paiement?.beneficiaire || paiement?.demandes_paiement?.beneficiaire || "-";
+  const demandeUuid = paiement?.demandes_paiement?.uuid || null;
 
   return (
     <div className="space-y-4">
@@ -148,27 +156,25 @@ export default function PaiementDetail() {
             <Info label="Type" value={paiement.type_paiement} />
             <Info label="Montant" value={`${formatMoney(paiement.montant)} FCFA`} />
             <Info label="Moyen de paiement" value={paiement.moyen_paiement || "-"} />
-            <Info label="Bénéficiaire" value={paiement.beneficiaire} />
+            <Info label="Bénéficiaire" value={beneficiaireLabel} />
             <Info label="Comptable" value={comptableLabel} />
             <Info label="Créé" value={formatDateTime(paiement.created_at)} />
-            <Info label="Demande" value={paiement.demandes_paiement?.uuid || "-"} />
+            <Info
+              label="Demande"
+              value={
+                demandeUuid && canViewDemandeDetails ? (
+                  <Link
+                    to={`/demandes/${demandeUuid}`}
+                    className="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    {demandeUuid}
+                  </Link>
+                ) : (
+                  demandeUuid || "-"
+                )
+              }
+            />
           </div>
-
-          {paiement.demandes_paiement && canViewDemandeDetails ? (
-            <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Demande liée</div>
-              <div className="mt-2">
-                <Link
-                  to={`/demandes/${paiement.demandes_paiement.uuid}`}
-                  title="Voir la demande"
-                  aria-label="Voir la demande"
-                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
-                >
-                  <FiEye />
-                </Link>
-              </div>
-            </div>
-          ) : null}
 
           <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
             <div className="text-sm font-medium text-gray-800 dark:text-white/90">Documents joints</div>

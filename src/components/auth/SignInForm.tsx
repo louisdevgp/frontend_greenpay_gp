@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { EyeCloseIcon, EyeIcon } from "../../icons";
 import Label from "../form/Label";
@@ -7,12 +7,6 @@ import Input from "../form/input/InputField";
 import Button from "../ui/button/Button";
 
 import { useAuth } from "../../context/AuthContext.jsx";
-import {
-  buildChangePasswordRedirectUrl,
-  consumePostLoginRedirect,
-  getRedirectFromSearch,
-  setPostLoginRedirect,
-} from "../../utils/postLoginRedirect";
 
 function getErrorMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
@@ -25,7 +19,6 @@ function getErrorMessage(err: unknown, fallback: string) {
 
 export default function SignInForm() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { login } = useAuth() as {
     login: (args: { email: string; password: string; persist: boolean }) => Promise<{ mustChangePassword?: boolean }>;
   };
@@ -55,16 +48,10 @@ export default function SignInForm() {
         persist: false,
       });
 
-      const redirectFromQuery = getRedirectFromSearch(location.search);
-      if (redirectFromQuery) {
-        setPostLoginRedirect(redirectFromQuery);
-      }
-      const redirectTarget = consumePostLoginRedirect("/");
-
       if (next?.mustChangePassword) {
-        navigate(buildChangePasswordRedirectUrl(redirectTarget), { replace: true });
+        navigate("/change-password", { replace: true });
       } else {
-        navigate(redirectTarget, { replace: true });
+        navigate("/", { replace: true });
       }
     } catch (err: unknown) {
       setErrorMsg(
