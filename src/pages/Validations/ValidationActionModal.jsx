@@ -10,9 +10,11 @@ import {
 import { Modal } from "../../components/ui/modal";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { emitToast } from "../../services/toastBus";
+import { listBudgetLines } from "../../services/budgetLines.service";
 import { formatMoney } from "../../utils/formatUtils";
 import { downloadFile } from "../../utils/downloadFile";
 import { FIRMA_ENABLED } from "../../utils/firma";
+import { budgetLineOptionLabel, budgetWarningForAmount, formatBudgetWarning } from "../../utils/budgetLines";
 
 const DAF_CRITERE4_LABEL = import.meta.env.VITE_DAF_CRITERE4_LABEL || "Moyen de paiement";
 
@@ -88,6 +90,9 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [dafConditionsChoice, setDafConditionsChoice] = useState("daf"); // "daf" | "demandeur"
   const [dafConditionsMode, setDafConditionsMode] = useState("100/100"); // 100/100 | 70/30 | 50/50 | custom
   const [dafConditions, setDafConditions] = useState([makeDafCondition(0)]);
+  const [budgetLines, setBudgetLines] = useState([]);
+  const [budgetLinesLoading, setBudgetLinesLoading] = useState(false);
+  const [ligneBudgetaireId, setLigneBudgetaireId] = useState("");
 
   const commentaireRequired =
     mode === "reject" ||
@@ -187,6 +192,9 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setDafConditionsChoice("daf");
     setDafConditionsMode("100/100");
     setDafConditions([makeDafCondition(0)]);
+    setBudgetLines([]);
+    setBudgetLinesLoading(false);
+    setLigneBudgetaireId("");
     setError("");
     setSignatureUrl("");
     setSignatureRequestId("");
@@ -206,6 +214,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setValidationOci(demande?.validation_oci === true ? true : demande?.validation_oci === false ? false : null);
     setDafCritere4(normalizeDafCritere4Input(demande?.daf_critere4));
     setValidationStopRole(normalizeValidationStopRole(demande?.validation_stop_role) || "DG");
+    setLigneBudgetaireId(demande?.ligne_budgetaire_id ? String(demande.ligne_budgetaire_id) : "");
     if (dafExisting.length > 0) {
       setDafConditionsChoice("daf");
       setDafConditionsMode("custom");
@@ -236,9 +245,43 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     demande?.validation_oci,
     demande?.daf_critere4,
     demande?.validation_stop_role,
+    demande?.ligne_budgetaire_id,
     dafExisting,
     demandeurConditions.length,
   ]);
+
+  React.useEffect(() => {
+    if (!open || !isDaf || mode !== "approve") return;
+    let active = true;
+    const loadBudgetLines = async () => {
+      setBudgetLinesLoading(true);
+      try {
+        const res = await listBudgetLines({ activeOnly: true });
+        if (!active) return;
+        setBudgetLines(res?.success && Array.isArray(res.data) ? res.data : []);
+      } catch {
+        if (active) setBudgetLines([]);
+      } finally {
+        if (active) setBudgetLinesLoading(false);
+      }
+    };
+    loadBudgetLines();
+    return () => {
+      active = false;
+    };
+  }, [open, isDaf, mode]);
+
+  const selectedBudgetLine = useMemo(() => {
+    const selected = budgetLines.find((line) => Number(line.id) === Number(ligneBudgetaireId));
+    if (selected) return selected;
+    const assigned = demande?.lignes_budgetaires || null;
+    if (assigned && Number(assigned.id) === Number(ligneBudgetaireId)) return assigned;
+    return null;
+  }, [budgetLines, ligneBudgetaireId, demande?.lignes_budgetaires]);
+
+  const budgetWarning = useMemo(() => {
+    return budgetWarningForAmount(selectedBudgetLine, totalMontant);
+  }, [selectedBudgetLine, totalMontant]);
 
   const addDafCondition = () => {
     setDafConditions((prev) => [
@@ -320,10 +363,11 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
           budgetDisponible === null ||
           paiementImmediat === null ||
           validationOci === null ||
-          !dafCritere4
+          !dafCritere4 ||
+          !ligneBudgetaireId
         ) {
           throw new Error(
-            "Controle DAF: renseigne Budget prevu, Budget disponible, Paiement immediat, Validé par OCI et Moyen de paiement"
+            "Controle DAF: renseigne Budget prevu, Budget disponible, Paiement immediat, Validé par OCI, Moyen de paiement et Ligne budgetaire"
           );
         }
 
@@ -393,7 +437,11 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
           }
         }
 
-        dafExtraPayload = { ...dafExtraPayload, validation_stop_role: stopRoleNormalized };
+        dafExtraPayload = {
+          ...dafExtraPayload,
+          validation_stop_role: stopRoleNormalized,
+          ligne_budgetaire_id: Number(ligneBudgetaireId),
+        };
       }
 
       if (mode === "approve") {
@@ -655,6 +703,36 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                     <option value="DGA">Jusqu'au DGA</option>
                     <option value="DAF">Jusqu'au DAF</option>
                   </select>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600 dark:text-gray-300">Ligne budgetaire</div>
+                  <select
+                    value={ligneBudgetaireId}
+                    onChange={(e) => setLigneBudgetaireId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                    disabled={budgetLinesLoading}
+                  >
+                    <option value="">
+                      {budgetLinesLoading ? "Chargement..." : "Selectionnez une ligne budgetaire"}
+                    </option>
+                    {budgetLines.map((line) => (
+                      <option key={line.id} value={line.id}>
+                        {budgetLineOptionLabel(line)}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedBudgetLine ? (
+                    <div
+                      className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                        budgetWarning?.exceeded
+                          ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                          : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                      }`}
+                    >
+                      {formatBudgetWarning(selectedBudgetLine, totalMontant)}
+                      {budgetWarning?.exceeded ? " Le depassement est autorise en mode souple." : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

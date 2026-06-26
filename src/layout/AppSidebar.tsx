@@ -124,6 +124,14 @@ const MENU_ITEMS: MenuItem[] = [
   },
   {
     section: "main",
+    icon: <BoxCubeIcon />,
+    name: "Budget",
+    subItems: [
+      { name: "Lignes budgetaires", path: "/budget/lignes", icon: <TableIcon />, permission: "BUDGET_LINE_LIST" },
+    ],
+  },
+  {
+    section: "main",
     icon: <TableIcon />,
     name: "Achats",
     subItems: [

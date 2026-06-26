@@ -26,6 +26,7 @@ import { agentDisplayName, validationActorLabel, isDelegatedValidation } from ".
 import Loader from "../../components/common/Loader";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 import DocumentFileIcon from "../../components/common/DocumentFileIcon";
+import { budgetLineLabel } from "../../utils/budgetLines";
 
 const DAF_CRITERE4_LABEL = "Moyen de paiement";
 const ACHETEUR_ALLOWED_UPLOAD_TYPES = new Set(["preuve_achat", "facture", "bon_livraison"]);
@@ -1159,6 +1160,14 @@ export default function DemandeDetail() {
                 { label: "Paiement immédiat", value: demande.paiement_immediat ? "Oui" : "Non" },
                 { label: "Budget prévu", value: demande.budget_prevu ? "Oui" : "Non" },
                 { label: "Budget dispo", value: demande.budget_disponible ? "Oui" : "Non" },
+                { label: "Ligne budgetaire", value: budgetLineLabel(demande.lignes_budgetaires) },
+                {
+                  label: "Depassement budgetaire",
+                  value:
+                    Number(demande.budget_depassement_montant || 0) > 0
+                      ? `${formatMoney(demande.budget_depassement_montant)} FCFA`
+                      : "-",
+                },
                 { label: dafCritere4Info.label, value: dafCritere4Info.value },
               ].map((item) => (
                 <div key={item.label}>

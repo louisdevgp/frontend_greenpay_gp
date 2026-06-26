@@ -8,6 +8,7 @@ import LoadingButton from "../../components/common/LoadingButton";
 import DocumentFileIcon from "../../components/common/DocumentFileIcon";
 import { downloadFile } from "../../utils/downloadFile";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { budgetLineLabel } from "../../utils/budgetLines";
 
 export default function PaiementDetail() {
   const { uuid } = useParams();
@@ -163,6 +164,7 @@ export default function PaiementDetail() {
             <Info label="Type" value={paiement.type_paiement} />
             <Info label="Montant" value={`${formatMoney(paiement.montant)} FCFA`} />
             <Info label="Moyen de paiement" value={paiement.moyen_paiement || "-"} />
+            <Info label="Ligne budgetaire" value={budgetLineLabel(paiement.lignes_budgetaires || paiement.demandes_paiement?.lignes_budgetaires)} />
             <Info label="Bénéficiaire" value={beneficiaireLabel} />
             <Info label="Comptable" value={comptableLabel} />
             <Info label="Créé" value={formatDateTime(paiement.created_at)} />

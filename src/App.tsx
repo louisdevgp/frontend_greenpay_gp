@@ -49,6 +49,7 @@ import ReceptionsList from "./pages/Receptions/ReceptionsList";
 import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
 import SignatureTest from "./pages/Tests/SignatureTest";
 import AchatsList from "./pages/Achats/AchatsList";
+import BudgetLinesList from "./pages/Budget/BudgetLinesList";
 
 // admin
 import PeopleAdmin from "./pages/Admin/PeopleAdmin";
@@ -136,6 +137,11 @@ export default function App() {
                 <Route path="/achats" element={<AchatsList mode="all" />} />
                 <Route path="/achats/pending" element={<AchatsList mode="pending" />} />
                 <Route path="/achats/done" element={<AchatsList mode="done" />} />
+              </Route>
+
+              {/* Budget */}
+              <Route element={<PermissionGuard allow={["BUDGET_LINE_LIST"]} />}>
+                <Route path="/budget/lignes" element={<BudgetLinesList />} />
               </Route>
 
               {/* Validations */}

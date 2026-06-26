@@ -10,6 +10,7 @@ import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
 import { agentDisplayName, validationActorLabel, isDelegatedValidation } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { budgetLineLabel } from "../../utils/budgetLines";
 
 function pickDemande(v) {
   return v?.demande || v?.demandes_paiement || v?.demande_paiement || null;
@@ -178,6 +179,7 @@ export default function ValidationDetail() {
                   { label: "UUID", value: <span className="font-mono">{demande.uuid}</span> },
                   { label: "Motif", value: demande.motif || "-" },
                   { label: "Montant", value: `${formatMoney(demande.montant_net ?? demande.montant)} FCFA` },
+                  { label: "Ligne budgetaire", value: budgetLineLabel(demande.lignes_budgetaires) },
                   {
                     label: "Statut",
                     value: (

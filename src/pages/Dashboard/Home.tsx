@@ -16,6 +16,36 @@ type ByProfilRow = { role: string; count?: number; montant?: number };
 type ByMoyenRow = { moyen_paiement?: string; moyen?: string; count?: number; montant?: number };
 type TopBeneficiaireRow = { beneficiaire?: string; count?: number; montant?: number };
 type DirectionItem = { id: number; nom: string };
+type BudgetLineDashboardRow = {
+  id?: number;
+  code?: string;
+  libelle?: string;
+  exercice?: number;
+  statut?: string;
+  devise?: string;
+  montant_initial?: number;
+  montant_engage?: number;
+  montant_paye?: number;
+  solde_disponible?: number;
+  taux_consommation?: number;
+  depassement_montant?: number;
+};
+type BudgetDashboard = {
+  totals?: {
+    count?: number;
+    montant_initial?: number;
+    montant_engage?: number;
+    montant_paye?: number;
+    solde_disponible?: number;
+    depassement_montant?: number;
+    lignes_en_depassement?: number;
+    lignes_a_surveillance?: number;
+    demandes_sans_ligne?: number;
+  };
+  topConsumed?: BudgetLineDashboardRow[];
+  overrunLines?: BudgetLineDashboardRow[];
+  warningLines?: BudgetLineDashboardRow[];
+};
 
 type DashboardData = {
   period?: { from?: string; to?: string };
@@ -36,6 +66,7 @@ type DashboardData = {
     paiementsByMoyen?: ByMoyenRow[];
   };
   exec?: { demandes?: MoneyCount; paiements?: MoneyCount; topBeneficiaires?: TopBeneficiaireRow[] };
+  budget?: BudgetDashboard | null;
 };
 
 const getErrorMessage = (err: unknown): string => {
@@ -481,6 +512,125 @@ export default function Home() {
                 })()}
               </ChartCard>
             ) : null}
+          </section>
+        ) : null}
+
+        {/* BUDGET */}
+        {data?.budget ? (
+          <section className="space-y-4" style={fadeIn(160)}>
+            <SectionHeader
+              title="Budget"
+              subtitle="Lecture des lignes budgetaires activee par permission dediee."
+              badge="BUDGET_DASHBOARD_VIEW"
+            />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <StatCard
+                title="Budget initial"
+                value={`${formatMoney(data.budget?.totals?.montant_initial ?? 0)} FCFA`}
+                tone="brand"
+              />
+              <StatCard
+                title="Engage"
+                value={`${formatMoney(data.budget?.totals?.montant_engage ?? 0)} FCFA`}
+                tone="warning"
+              />
+              <StatCard
+                title="Paye"
+                value={`${formatMoney(data.budget?.totals?.montant_paye ?? 0)} FCFA`}
+                tone="success"
+              />
+              <StatCard
+                title="Solde disponible"
+                value={`${formatMoney(data.budget?.totals?.solde_disponible ?? 0)} FCFA`}
+                tone={(data.budget?.totals?.solde_disponible ?? 0) < 0 ? "error" : "info"}
+              />
+              <StatCard
+                title="Demandes sans ligne"
+                value={String(data.budget?.totals?.demandes_sans_ligne ?? 0)}
+                subtitle="Sur la periode"
+                tone="neutral"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <ChartCard title="Top lignes consommees" subtitle="Taux engage + paye / budget initial" tone="brand">
+                {(() => {
+                  const rows = data.budget?.topConsumed || [];
+                  const categories = rows.map((r: BudgetLineDashboardRow) => String(r.code || r.libelle || "-"));
+                  const seriesData = rows.map((r: BudgetLineDashboardRow) => Number(r.taux_consommation || 0));
+
+                  const options: ApexOptions = {
+                    ...baseChartOptions,
+                    chart: { ...(baseChartOptions.chart || {}), type: "bar", height: 320 },
+                    colors: ["var(--color-brand-500)"],
+                    plotOptions: { bar: { horizontal: true, borderRadius: 2, barHeight: "68%" } },
+                    dataLabels: {
+                      ...(baseChartOptions.dataLabels || {}),
+                      enabled: true,
+                      formatter: (v: number) => `${Number(v || 0).toFixed(1)}%`,
+                    },
+                    xaxis: {
+                      categories,
+                      max: Math.max(100, ...seriesData),
+                      labels: { formatter: (v: string | number) => `${Number(v || 0).toFixed(0)}%`, style: axisLabelStyle },
+                    },
+                    yaxis: { labels: { style: axisLabelStyle } },
+                    tooltip: {
+                      ...(baseChartOptions.tooltip || {}),
+                      y: { formatter: (v: number) => `${Number(v || 0).toFixed(2)}%` },
+                    },
+                  };
+
+                  if (!seriesData.some((x: number) => x > 0)) {
+                    return <EmptyState label="Aucune ligne budgetaire consommee." />;
+                  }
+
+                  return <Chart options={options} series={[{ name: "Consommation", data: seriesData }]} type="bar" height={320} />;
+                })()}
+              </ChartCard>
+
+              <ChartCard title="Alertes budgetaires" subtitle="Depassements et lignes a surveiller" tone="warning">
+                {(() => {
+                  const alerts = [
+                    ...(data.budget?.overrunLines || []).map((line) => ({ ...line, alertType: "Depassement" })),
+                    ...(data.budget?.warningLines || []).map((line) => ({ ...line, alertType: "Surveillance" })),
+                  ].slice(0, 8);
+
+                  if (!alerts.length) return <EmptyState label="Aucune alerte budgetaire." />;
+
+                  return (
+                    <div className="overflow-hidden border border-gray-200 dark:border-gray-800">
+                      <div className="grid grid-cols-[minmax(0,1fr)_90px_120px] border-b border-gray-200 bg-gray-50 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-950/60">
+                        <span>Ligne</span>
+                        <span className="text-right">Taux</span>
+                        <span className="text-right">Solde</span>
+                      </div>
+                      {alerts.map((line, index) => (
+                        <div
+                          key={`${line.alertType}-${line.id || index}`}
+                          className="grid grid-cols-[minmax(0,1fr)_90px_120px] items-center border-b border-gray-100 px-3 py-2.5 text-xs last:border-b-0 dark:border-gray-800"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-gray-700 dark:text-gray-200">
+                              {line.code || "-"} - {line.libelle || "-"}
+                            </span>
+                            <span className={line.alertType === "Depassement" ? "text-error-600 dark:text-error-300" : "text-warning-600 dark:text-warning-300"}>
+                              {line.alertType}
+                            </span>
+                          </span>
+                          <span className="text-right font-medium text-gray-700 dark:text-gray-200">
+                            {Number(line.taux_consommation || 0).toFixed(1)}%
+                          </span>
+                          <span className={(line.solde_disponible || 0) < 0 ? "text-right text-error-600 dark:text-error-300" : "text-right text-gray-500 dark:text-gray-400"}>
+                            {formatMoney(line.solde_disponible || 0)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </ChartCard>
+            </div>
           </section>
         ) : null}
 

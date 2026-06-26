@@ -2,9 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FiCheckCircle, FiX } from "react-icons/fi";
 import { createPaiement, startPaiementSignature, completePaiementSignature } from "../../services/paiements.service";
 import { listAllDemandes } from "../../services/demandes.services";
+import { listBudgetLines } from "../../services/budgetLines.service";
 import { Modal } from "../../components/ui/modal";
+import { useAuth } from "../../context/AuthContext";
 import { emitToast } from "../../services/toastBus";
 import { formatMoney } from "../../utils/formatUtils";
+import { budgetLineLabel, budgetLineOptionLabel, budgetWarningForAmount, formatBudgetWarning } from "../../utils/budgetLines";
 import { uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
@@ -64,6 +67,8 @@ function isFullyPaid(demande) {
 }
 
 export default function CreatePaiementModal({ open, onClose, onCreated, defaultDemandeId = "" }) {
+  const { hasAnyRole } = useAuth();
+  const canChangeBudgetLine = hasAnyRole(["DAF", "ADMIN"]);
   const [form, setForm] = useState({
     demande_id: "",
     type_paiement: "total",
@@ -86,6 +91,9 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
   const [signatureUserId, setSignatureUserId] = useState("");
   const [signatureError, setSignatureError] = useState("");
   const [signatureCompleting, setSignatureCompleting] = useState(false);
+  const [budgetLines, setBudgetLines] = useState([]);
+  const [budgetLinesLoading, setBudgetLinesLoading] = useState(false);
+  const [ligneBudgetaireId, setLigneBudgetaireId] = useState("");
   const isSigning = FIRMA_ENABLED && Boolean(signatureUrl);
 
   const fetchDemandes = async () => {
@@ -119,8 +127,37 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
   }, [open]);
 
   useEffect(() => {
+    if (!open || !canChangeBudgetLine) return;
+    let active = true;
+    const load = async () => {
+      setBudgetLinesLoading(true);
+      try {
+        const res = await listBudgetLines({ activeOnly: true });
+        if (!active) return;
+        setBudgetLines(res?.success && Array.isArray(res.data) ? res.data : []);
+      } catch {
+        if (active) setBudgetLines([]);
+      } finally {
+        if (active) setBudgetLinesLoading(false);
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [open, canChangeBudgetLine]);
+
+  useEffect(() => {
     resolveDemande(form.demande_id);
   }, [form.demande_id, demandes]);
+
+  useEffect(() => {
+    if (!demandeResolved) {
+      setLigneBudgetaireId("");
+      return;
+    }
+    setLigneBudgetaireId(demandeResolved?.ligne_budgetaire_id ? String(demandeResolved.ligne_budgetaire_id) : "");
+  }, [demandeResolved?.id, demandeResolved?.ligne_budgetaire_id]);
 
   useEffect(() => {
     if (!open) return;
@@ -152,6 +189,9 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     setSignatureUserId("");
     setSignatureError("");
     setSignatureCompleting(false);
+    setBudgetLines([]);
+    setBudgetLinesLoading(false);
+    setLigneBudgetaireId("");
   };
 
   const close = () => {
@@ -190,6 +230,9 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
         moyen_paiement: form.moyen_paiement,
         conditions_source: conditionsSource,
       };
+      if (canChangeBudgetLine && ligneBudgetaireId) {
+        payload.ligne_budgetaire_id = Number(ligneBudgetaireId);
+      }
 
       if (!FIRMA_ENABLED) {
         const res = await createPaiement(payload);
@@ -430,6 +473,18 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
     return null;
   };
 
+  const selectedBudgetLine = useMemo(() => {
+    const selected = budgetLines.find((line) => Number(line.id) === Number(ligneBudgetaireId));
+    if (selected) return selected;
+    const assigned = demandeResolved?.lignes_budgetaires || null;
+    if (assigned && Number(assigned.id) === Number(ligneBudgetaireId)) return assigned;
+    return null;
+  }, [budgetLines, ligneBudgetaireId, demandeResolved?.lignes_budgetaires]);
+
+  const budgetWarning = useMemo(() => {
+    return budgetWarningForAmount(selectedBudgetLine, Number(form.montant || 0));
+  }, [selectedBudgetLine, form.montant]);
+
   const errorMsg = validateMontant();
 
   if (!open) return null;
@@ -516,6 +571,47 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
             {nextTranche?.montant_prevu != null ? (
               <div>
                 {" — "}Prochaine tranche: <span className="font-medium">{formatMoney(nextTranche.montant_prevu)} FCFA</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {demandeResolved ? (
+          <div className="p-3 border border-gray-200 rounded-xl dark:border-gray-800">
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Ligne budgetaire</div>
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Ligne actuelle: {budgetLineLabel(demandeResolved?.lignes_budgetaires)}
+            </div>
+            {canChangeBudgetLine ? (
+              <div className="mt-3">
+                <select
+                  value={ligneBudgetaireId}
+                  onChange={(e) => setLigneBudgetaireId(e.target.value)}
+                  disabled={loading || budgetLinesLoading}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+                >
+                  <option value="">{budgetLinesLoading ? "Chargement..." : "Selectionnez une ligne"}</option>
+                  {budgetLines.map((line) => (
+                    <option key={line.id} value={line.id}>
+                      {budgetLineOptionLabel(line)}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Le changement est reserve au DAF avant le premier paiement.
+                </p>
+              </div>
+            ) : null}
+            {selectedBudgetLine ? (
+              <div
+                className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                  budgetWarning?.exceeded
+                    ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                    : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                }`}
+              >
+                {formatBudgetWarning(selectedBudgetLine, Number(form.montant || 0))}
+                {budgetWarning?.exceeded ? " Le depassement est autorise en mode souple." : null}
               </div>
             ) : null}
           </div>
