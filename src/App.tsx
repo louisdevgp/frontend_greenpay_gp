@@ -50,6 +50,7 @@ import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
 import SignatureTest from "./pages/Tests/SignatureTest";
 import AchatsList from "./pages/Achats/AchatsList";
 import BudgetLinesList from "./pages/Budget/BudgetLinesList";
+import OtpVerificationModal from "./components/common/OtpVerificationModal";
 
 // admin
 import PeopleAdmin from "./pages/Admin/PeopleAdmin";
@@ -71,6 +72,7 @@ export default function App() {
   return (
     <Router>
       <ScrollToTop />
+      <OtpVerificationModal />
 
       <Routes>
         {/* ---------------- PUBLIC SCAN (QR) ---------------- */}

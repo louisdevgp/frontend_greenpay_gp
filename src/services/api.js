@@ -2,6 +2,7 @@
 import axios from "axios";
 import { readStorage, removeStorage, STORAGE_KEYS } from "../utils/storage";
 import { emitToast } from "./toastBus";
+import { requireOtpVerification } from "./otpGate";
 
 const inferredHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
 const inferredApiPort = import.meta.env.VITE_API_PORT || "8000";
@@ -133,6 +134,17 @@ api.interceptors.response.use(
     }
     const serverMessage = responseData?.message;
     const message = serverMessage || error?.message || "Erreur réseau";
+
+    // Vérification OTP hebdomadaire requise avant signature
+    if (status === 403 && responseData?.requiresOtp === true) {
+      try {
+        await requireOtpVerification();
+        // OTP validé : on retente la requête originale
+        return api(error.config);
+      } catch {
+        return Promise.reject(new Error("Vérification OTP annulée"));
+      }
+    }
 
     if (status === 401) {
       removeStorage(STORAGE_KEYS.AUTH);
