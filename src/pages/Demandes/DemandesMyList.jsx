@@ -13,6 +13,7 @@ import { useAuth } from "../../context/AuthContext";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
+import DemandAttachmentsIndicator from "../../components/common/DemandAttachmentsIndicator";
 
 const STORAGE_KEY = "filters:demandes:my";
 
@@ -278,6 +279,7 @@ export default function DemandesMyList() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">PJ</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
@@ -293,6 +295,9 @@ export default function DemandesMyList() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
+                    <td className="px-3 py-3 text-center text-sm">
+                      <DemandAttachmentsIndicator demande={demande} />
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       {canViewDetails ? (
                         <Link

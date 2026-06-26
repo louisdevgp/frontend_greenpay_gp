@@ -13,6 +13,7 @@ import { exportRowsToExcel } from "../../utils/excelExport";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import CreatePaiementModal from "./CreatePaiementModal";
 import { useRealtime } from "../../context/RealtimeContext.tsx";
+import DemandAttachmentsIndicator from "../../components/common/DemandAttachmentsIndicator";
 
 const STORAGE_KEY = "filters:paiements:pending";
 const PAYABLE_STATUSES = new Set(["approuvee", "en_attente_paiement", "achat_effectue", "receptionnee"]);
@@ -305,6 +306,7 @@ export default function PaiementsPending() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Moyen</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Bénéficiaire</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">PJ</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
@@ -322,6 +324,9 @@ export default function PaiementsPending() {
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.daf_critere4 || "-"}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
+                    <td className="px-3 py-3 text-center text-sm">
+                      <DemandAttachmentsIndicator demande={demande} />
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
                         <button

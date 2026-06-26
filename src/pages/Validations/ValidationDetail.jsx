@@ -1,9 +1,10 @@
 ﻿import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { FiArrowLeft, FiDownload, FiEye, FiRefreshCw } from "react-icons/fi";
+import { FiArrowLeft, FiEye, FiRefreshCw } from "react-icons/fi";
 import { getValidationByUuid } from "../../services/validations.service";
 import { listDocuments } from "../../services/documents.service";
 import LoadingButton from "../../components/common/LoadingButton";
+import DocumentFileIcon from "../../components/common/DocumentFileIcon";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { downloadFile } from "../../utils/downloadFile";
 import { useAuth } from "../../context/AuthContext";
@@ -205,25 +206,30 @@ export default function ValidationDetail() {
               ) : documents.length === 0 ? (
                 <div className="text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
               ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {documents.map((doc) => {
                     const downloadKey = `doc-${doc.id}`;
                     return (
-                      <div key={doc.id} className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg dark:border-gray-800">
-                        <div>
-                          <div className="font-medium">{doc.type_document}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                      <LoadingButton
+                        key={doc.id}
+                        type="button"
+                        onClick={() =>
+                          runDownload(downloadKey, () =>
+                            downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`)
+                          )
+                        }
+                        loading={isDownloading(downloadKey)}
+                        title="Télécharger"
+                        aria-label="Télécharger"
+                        className="flex h-full w-full items-center gap-3 p-3 text-left text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                      >
+                        <DocumentFileIcon fileName={doc.nom_fichier} format={doc.format} url={doc.url} />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium">{doc.type_document || "document"}</div>
+                          <div className="truncate text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                          <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</div>
                         </div>
-                        <LoadingButton
-                          onClick={() => runDownload(downloadKey, () => downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier))}
-                          loading={isDownloading(downloadKey)}
-                          title="Télécharger"
-                          aria-label="Télécharger"
-                          className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-blue-600 hover:bg-blue-50 dark:border-gray-800 dark:text-blue-400 dark:hover:bg-blue-950"
-                        >
-                          {isDownloading(downloadKey) ? null : <FiDownload />}
-                        </LoadingButton>
-                      </div>
+                      </LoadingButton>
                     );
                   })}
                 </div>

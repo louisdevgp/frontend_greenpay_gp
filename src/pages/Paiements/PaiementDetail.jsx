@@ -5,13 +5,14 @@ import { getPaiement } from "../../services/paiements.service";
 import { listDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
 import LoadingButton from "../../components/common/LoadingButton";
+import DocumentFileIcon from "../../components/common/DocumentFileIcon";
 import { downloadFile } from "../../utils/downloadFile";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 
 export default function PaiementDetail() {
   const { uuid } = useParams();
   const nav = useNavigate();
-  const { hasPermission, hasAnyPermission } = useAuth();
+  const { hasAnyPermission } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -67,7 +68,13 @@ export default function PaiementDetail() {
     }
   }, [paiement?.id]);
 
-  const canDownloadPdf = hasPermission("PAIEMENT_GET");
+  const canDownloadDemandePdf = hasAnyPermission([
+    "DEMANDE_PDF",
+    "DEMANDE_LIST_ASSIGNED_ACHETEUR",
+    "VALIDATION_LIST_PENDING",
+    "VALIDATION_LIST_DONE",
+    "PAIEMENT_GET",
+  ]);
   const canViewDemandeDetails = hasAnyPermission([
     "DEMANDE_LIST",
     "DEMANDE_LIST_SELF",
@@ -123,20 +130,20 @@ export default function PaiementDetail() {
               >
                 <FiArrowLeft />
               </button>
-              {canDownloadPdf ? (
+              {demandeUuid && canDownloadDemandePdf ? (
                 <LoadingButton
                   type="button"
                   onClick={() =>
-                    runDownload("paiement-pdf", () =>
-                      downloadFile(`/paiements/${paiement.uuid}/pdf`, `paiement_${paiement.uuid}.pdf`)
+                    runDownload("demande-pdf", () =>
+                      downloadFile(`/demandes/${demandeUuid}/pdf`, `demande_${demandeUuid}.pdf`)
                     )
                   }
-                  loading={isDownloading("paiement-pdf")}
-                  title="Télécharger PDF"
-                  aria-label="Télécharger PDF"
+                  loading={isDownloading("demande-pdf")}
+                  title="Télécharger fiche demande"
+                  aria-label="Télécharger fiche demande"
                   className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
                 >
-                  {isDownloading("paiement-pdf") ? null : <FiDownload />}
+                  {isDownloading("demande-pdf") ? null : <FiDownload />}
                 </LoadingButton>
               ) : null}
               <button
@@ -183,7 +190,7 @@ export default function PaiementDetail() {
             ) : documents.length === 0 ? (
               <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">Aucun document.</div>
             ) : (
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {documents.map((doc) => (
                   <button
                     key={doc.id}
@@ -191,13 +198,14 @@ export default function PaiementDetail() {
                     onClick={() =>
                       downloadFile(`/documents/${doc.id}/download`, doc.nom_fichier || `document_${doc.id}`, { mode: "preview" })
                     }
-                    className="flex items-center justify-between p-3 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
+                    className="flex h-full w-full items-center gap-3 p-3 text-left text-sm border border-gray-200 rounded-lg hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                   >
-                    <div>
+                    <DocumentFileIcon fileName={doc.nom_fichier} format={doc.format} url={doc.url} />
+                    <div className="min-w-0 flex-1">
                       <div className="font-medium">{doc.type_document || "document"}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                      <div className="truncate text-xs text-gray-500 dark:text-gray-400">{doc.nom_fichier}</div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</div>
                     </div>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">{formatDateTime(doc.created_at)}</span>
                   </button>
                 ))}
               </div>

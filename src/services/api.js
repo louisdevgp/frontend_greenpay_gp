@@ -120,9 +120,18 @@ api.interceptors.response.use(
     response.data = normalizeResponsePayload(response.data);
     return response;
   },
-  (error) => {
+  async (error) => {
     const status = error?.response?.status;
-    const serverMessage = error?.response?.data?.message;
+    let responseData = error?.response?.data;
+    if (typeof Blob !== "undefined" && responseData instanceof Blob) {
+      try {
+        const raw = await responseData.text();
+        responseData = raw ? JSON.parse(raw) : null;
+      } catch {
+        responseData = null;
+      }
+    }
+    const serverMessage = responseData?.message;
     const message = serverMessage || error?.message || "Erreur réseau";
 
     if (status === 401) {
@@ -158,7 +167,7 @@ api.interceptors.response.use(
 
     const wrapped = new Error(message);
     wrapped.status = status;
-    wrapped.data = error?.response?.data;
+    wrapped.data = responseData;
     return Promise.reject(wrapped);
   }
 );

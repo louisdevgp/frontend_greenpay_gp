@@ -16,6 +16,7 @@ import ConfirmActionModal from "../../components/common/ConfirmActionModal";
 import ExportButton from "../../components/common/ExportButton";
 import { exportRowsToExcel } from "../../utils/excelExport";
 import { useRealtime } from "../../context/RealtimeContext.tsx";
+import DemandAttachmentsIndicator from "../../components/common/DemandAttachmentsIndicator";
 
 const STORAGE_KEY = "filters:validations:done";
 
@@ -329,6 +330,7 @@ export default function ValidationsDone() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Validé par</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Commentaire</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">PJ</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
@@ -384,6 +386,9 @@ export default function ValidationsDone() {
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(validation.validated_at)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs">
                         {validation?.commentaire || "-"}
+                      </td>
+                      <td className="px-3 py-3 text-center text-sm">
+                        <DemandAttachmentsIndicator demande={demande} />
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2">

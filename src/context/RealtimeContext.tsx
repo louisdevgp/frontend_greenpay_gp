@@ -224,10 +224,12 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const handleReceptionPendingStatus = (payload: { count?: number; hasPending?: boolean }) => {
       if (typeof payload?.count === "number") {
         setPendingReceptionsCount(payload.count);
+        setReceptionsTick((t) => t + 1);
         return;
       }
       if (typeof payload?.hasPending === "boolean") {
         setPendingReceptionsCount(payload.hasPending ? 1 : 0);
+        setReceptionsTick((t) => t + 1);
       }
     };
 

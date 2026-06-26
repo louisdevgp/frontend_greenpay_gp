@@ -12,10 +12,11 @@ import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
 import { labelDemandeStatut, demandeStatusBadgeClass } from "../../utils/statusLabels";
 import { useRealtime } from "../../context/RealtimeContext.tsx";
+import DemandAttachmentsIndicator from "../../components/common/DemandAttachmentsIndicator";
 
 const MODE_STATUSES = {
   pending: ["en_attente_paiement", "paye", "payee"],
-  done: ["achat_effectue", "receptionnee", "cloture", "cloturee"],
+  done: ["en_attente_paiement", "paye", "payee", "achat_effectue", "receptionnee", "cloture", "cloturee"],
   all: ["en_attente_paiement", "paye", "payee", "achat_effectue", "receptionnee", "cloture", "cloturee"],
 };
 
@@ -27,6 +28,25 @@ function normalizeMode(mode) {
 
 function statusSetForMode(modeKey) {
   return new Set((MODE_STATUSES[modeKey] || MODE_STATUSES.all).map((s) => String(s).toLowerCase()));
+}
+
+function matchesMode(demande, modeKey) {
+  const statut = String(demande?.statut || "").toLowerCase();
+  if (modeKey === "pending") {
+    return ["en_attente_paiement", "paye", "payee"].includes(statut) && demande?.achat_requis == null;
+  }
+  if (modeKey === "done") {
+    return demande?.achat_requis != null || ["achat_effectue", "receptionnee", "cloture", "cloturee"].includes(statut);
+  }
+  return MODE_STATUSES.all.includes(statut);
+}
+
+function achatDecisionLabel(demande) {
+  if (demande?.achat_requis === false) return "Aucun achat nécessaire";
+  if (demande?.achat_requis === true || String(demande?.statut || "").toLowerCase() === "achat_effectue") {
+    return "Achat effectué";
+  }
+  return "Décision en attente";
 }
 
 function formatDate(input) {
@@ -82,6 +102,7 @@ export default function AchatsList({ mode = "all" }) {
         page: state.page,
         pageSize: state.pageSize,
         achat_pool: 1,
+        achat_decision: modeKey,
         statut: statutParam,
         ...(state.filters.beneficiaire ? { beneficiaire: state.filters.beneficiaire } : {}),
         ...(state.filters.dateStart ? { dateStart: state.filters.dateStart } : {}),
@@ -90,7 +111,7 @@ export default function AchatsList({ mode = "all" }) {
 
       const res = await listAllDemandes(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement achats");
-      const rows = (res.data || []).filter((d) => modeStatusSet.has(String(d?.statut || "").toLowerCase()));
+      const rows = (res.data || []).filter((d) => matchesMode(d, modeKey));
       setData(rows);
       setFiltered(rows);
     } catch (e) {
@@ -154,14 +175,14 @@ export default function AchatsList({ mode = "all" }) {
     modeKey === "pending"
       ? "Achats en attente"
       : modeKey === "done"
-        ? "Achats effectues"
+        ? "Décisions d'achat traitées"
         : "Mes achats";
 
   const emptyMessage =
     modeKey === "pending"
       ? "Aucun achat en attente."
       : modeKey === "done"
-        ? "Aucun achat effectue."
+        ? "Aucune décision d'achat traitée."
         : "Aucun achat assigne.";
 
   const exportColumns = [
@@ -169,6 +190,7 @@ export default function AchatsList({ mode = "all" }) {
     { header: "Motif", key: "motif" },
     { header: "Montant", value: (d) => `${formatMoney(d.montant_net ?? d.montant)} FCFA` },
     { header: "Acheteur", value: (d) => displayAcheteur(d) },
+    { header: "Décision achat", value: (d) => achatDecisionLabel(d) },
     { header: "Statut", value: (d) => labelDemandeStatut(d.statut) },
     { header: "Beneficiaire", value: (d) => d?.beneficiaire || "-" },
     { header: "Cree", value: (d) => formatDateTime(d.created_at) },
@@ -291,9 +313,11 @@ export default function AchatsList({ mode = "all" }) {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Motif</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Montant</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Acheteur</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Décision achat</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Beneficiaire</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Cree</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">PJ</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Actions</th>
                 </tr>
               </thead>
@@ -304,6 +328,7 @@ export default function AchatsList({ mode = "all" }) {
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 max-w-xs truncate">{demande.motif}</td>
                     <td className="px-4 py-3 text-sm">{formatMoney(demande.montant_net ?? demande.montant)} FCFA</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{displayAcheteur(demande)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{achatDecisionLabel(demande)}</td>
                     <td className="px-4 py-3 text-sm">
                       <span className={`px-2 py-1 text-xs rounded ${demandeStatusBadgeClass(demande.statut)}`}>
                         {labelDemandeStatut(demande.statut)}
@@ -311,6 +336,9 @@ export default function AchatsList({ mode = "all" }) {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{demande.beneficiaire || "-"}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(demande.created_at)}</td>
+                    <td className="px-3 py-3 text-center text-sm">
+                      <DemandAttachmentsIndicator demande={demande} />
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <Link
                         to={`/demandes/${demande.uuid}`}

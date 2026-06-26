@@ -11,6 +11,7 @@ import { agentDisplayName } from "../../utils/validationActors";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { exportRowsToExcel } from "../../utils/excelExport";
 import { useRealtime } from "../../context/RealtimeContext.tsx";
+import DemandAttachmentsIndicator from "../../components/common/DemandAttachmentsIndicator";
 
 const STORAGE_KEY = "filters:validations:pending";
 
@@ -222,6 +223,7 @@ export default function ValidationsPending() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Statut</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Demandeur</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">Créé</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">PJ</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-900 dark:divide-gray-800">
@@ -262,6 +264,9 @@ export default function ValidationsPending() {
                         {agentDisplayName(demande?.agents_demandes_paiement_demandeur_idToagents)}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateTime(validation.created_at)}</td>
+                      <td className="px-3 py-3 text-center text-sm">
+                        <DemandAttachmentsIndicator demande={demande} />
+                      </td>
                     </tr>
                   );
                 })}

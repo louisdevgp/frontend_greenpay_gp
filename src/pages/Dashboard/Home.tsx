@@ -8,6 +8,7 @@ import type { ApexOptions } from "apexcharts";
 import DatePicker from "../../components/form/date-picker";
 import { parseDateOnlyEnd, parseDateOnlyStart } from "../../utils/dateRange";
 import { formatMoney } from "../../utils/formatUtils";
+import { labelDemandeStatut } from "../../utils/statusLabels";
 
 type MoneyCount = { count?: number; montant?: number };
 type ByStatutRow = { statut: string; count?: number; montant?: number };
@@ -135,48 +136,48 @@ export default function Home() {
       foreColor: "var(--color-gray-500)",
     },
     theme: { mode: isDark ? "dark" : "light" },
-    grid: { borderColor: "var(--color-gray-200)", strokeDashArray: 4 },
+    grid: { borderColor: "var(--color-gray-200)", strokeDashArray: 0 },
     dataLabels: { style: { fontSize: "11px", fontWeight: 600 } },
     legend: { labels: { colors: "var(--color-gray-500)" } },
     tooltip: { theme: isDark ? "dark" : "light" },
   };
 
   const fadeIn = (delay = 0): CSSProperties => ({
-    animation: `dash-fade 0.6s ease-out ${delay}ms both`,
+    animation: `dash-fade 0.4s ease-out ${delay}ms both`,
   });
 
   type Tone = "brand" | "info" | "success" | "warning" | "error" | "neutral";
 
-  const toneMap: Record<Tone, { bar: string; glow: string; chip: string }> = {
+  const toneMap: Record<Tone, { accent: string; value: string; chip: string }> = {
     brand: {
-      bar: "from-brand-500 to-brand-300",
-      glow: "bg-[radial-gradient(120%_120%_at_90%_0%,rgba(70,95,255,0.18)_0%,transparent_60%)]",
-      chip: "bg-brand-50 text-brand-700",
+      accent: "bg-brand-500",
+      value: "text-brand-700 dark:text-brand-300",
+      chip: "border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300",
     },
     info: {
-      bar: "from-blue-light-500 to-blue-light-300",
-      glow: "bg-[radial-gradient(120%_120%_at_90%_0%,rgba(11,165,236,0.18)_0%,transparent_60%)]",
-      chip: "bg-blue-light-50 text-blue-light-700",
+      accent: "bg-blue-light-500",
+      value: "text-blue-light-700 dark:text-blue-light-300",
+      chip: "border-blue-light-200 bg-blue-light-50 text-blue-light-700 dark:border-blue-light-500/30 dark:bg-blue-light-500/10 dark:text-blue-light-300",
     },
     success: {
-      bar: "from-success-500 to-success-300",
-      glow: "bg-[radial-gradient(120%_120%_at_90%_0%,rgba(18,183,106,0.18)_0%,transparent_60%)]",
-      chip: "bg-success-50 text-success-700",
+      accent: "bg-success-500",
+      value: "text-success-700 dark:text-success-300",
+      chip: "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300",
     },
     warning: {
-      bar: "from-orange-500 to-orange-300",
-      glow: "bg-[radial-gradient(120%_120%_at_90%_0%,rgba(251,101,20,0.18)_0%,transparent_60%)]",
-      chip: "bg-orange-50 text-orange-700",
+      accent: "bg-warning-500",
+      value: "text-warning-700 dark:text-warning-300",
+      chip: "border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300",
     },
     error: {
-      bar: "from-error-500 to-error-300",
-      glow: "bg-[radial-gradient(120%_120%_at_90%_0%,rgba(240,68,56,0.18)_0%,transparent_60%)]",
-      chip: "bg-error-50 text-error-700",
+      accent: "bg-error-500",
+      value: "text-error-700 dark:text-error-300",
+      chip: "border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300",
     },
     neutral: {
-      bar: "from-gray-500 to-gray-300",
-      glow: "bg-[radial-gradient(120%_120%_at_90%_0%,rgba(102,112,133,0.16)_0%,transparent_60%)]",
-      chip: "bg-gray-100 text-gray-700",
+      accent: "bg-gray-500",
+      value: "text-gray-800 dark:text-gray-200",
+      chip: "border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300",
     },
   };
 
@@ -189,13 +190,13 @@ export default function Home() {
     subtitle?: string;
     badge?: string;
   }) => (
-    <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3 dark:border-gray-800">
       <div>
-        <h2 className="text-base font-semibold text-gray-900 dark:text-white/90">{title}</h2>
+        <h2 className="text-[15px] font-medium text-gray-800 dark:text-white/90">{title}</h2>
         {subtitle ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
       </div>
       {badge ? (
-        <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+        <span className="rounded-[3px] border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
           {badge}
         </span>
       ) : null}
@@ -203,7 +204,7 @@ export default function Home() {
   );
 
   const EmptyState = ({ label }: { label: string }) => (
-    <div className="flex min-h-[220px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-400">
+    <div className="flex min-h-[220px] items-center justify-center border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-950/50 dark:text-gray-400">
       {label}
     </div>
   );
@@ -221,18 +222,18 @@ export default function Home() {
   }) => {
     const toneCfg = toneMap[tone];
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_12px_30px_rgba(16,24,40,0.06)] dark:border-gray-800 dark:bg-gray-900/70">
-        <div className={`pointer-events-none absolute inset-0 ${toneCfg.glow}`} />
-        <div className={`absolute left-0 top-0 h-full w-1.5 bg-gradient-to-b ${toneCfg.bar}`} />
-        <div className="relative">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-              {title}
-            </p>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${toneCfg.chip}`}>KPI</span>
+      <div className="relative min-h-[116px] border border-gray-200 bg-white px-4 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] dark:border-gray-800 dark:bg-gray-900">
+        <div className={`absolute inset-x-0 top-0 h-0.5 ${toneCfg.accent}`} />
+        <div className="flex h-full flex-col items-center justify-center text-center">
+          <div className="flex w-full items-center justify-between gap-3">
+            <span className={`h-1.5 w-1.5 rounded-full ${toneCfg.accent}`} />
+            <span className={`rounded-[3px] border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${toneCfg.chip}`}>
+              Période
+            </span>
           </div>
-          <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white/90">{value}</p>
-          {subtitle ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
+          <p className={`mt-1 text-2xl font-semibold tracking-tight ${toneCfg.value}`}>{value}</p>
+          <p className="mt-1 text-xs font-medium text-gray-700 dark:text-gray-200">{title}</p>
+          {subtitle ? <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">{subtitle}</p> : null}
         </div>
       </div>
     );
@@ -251,13 +252,15 @@ export default function Home() {
   }) => {
     const toneCfg = toneMap[tone];
     return (
-      <div className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white px-5 pb-5 pt-5 shadow-[0_10px_26px_rgba(16,24,40,0.05)] dark:border-gray-800 dark:bg-gray-900/70 sm:px-6 sm:pt-6">
-        <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${toneCfg.bar}`} />
-        <div className="mb-4">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">{title}</h3>
+      <div className="border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)] dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex items-start gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5">
+          <span className={`mt-1.5 h-2 w-2 shrink-0 ${toneCfg.accent}`} />
+          <div>
+            <h3 className="text-sm font-medium text-gray-800 dark:text-white/90">{title}</h3>
           {subtitle ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{subtitle}</p> : null}
+          </div>
         </div>
-        {children}
+        <div className="p-4 sm:p-5">{children}</div>
       </div>
     );
   };
@@ -271,89 +274,89 @@ export default function Home() {
 
       <FullscreenLoader show={loading} label="Chargement du dashboard..." />
 
-      <div className="space-y-6">
+      <div className="-m-4 min-h-[calc(100vh-80px)] space-y-5 bg-[#f4f6fa] p-4 dark:bg-gray-950 md:-m-6 md:p-6">
         <div
-          className="relative overflow-hidden rounded-3xl border border-gray-200 bg-white px-5 py-6 shadow-[0_18px_40px_rgba(16,24,40,0.08)] dark:border-gray-800 dark:bg-gray-900/70 sm:px-8 sm:py-7"
+          className="space-y-4"
           style={fadeIn(0)}
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_10%_0%,rgba(70,95,255,0.18)_0%,transparent_60%)]" />
-          <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-success-500/10 blur-3xl" />
-          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-brand-600 dark:text-brand-400">
-                GREENPAY E-DEPENSES
+              <h1 className="text-xl font-medium text-gray-800 dark:text-white/90">Dashboard</h1>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Vue synthétique du circuit des dépenses et des validations.
               </p>
-              <h1 className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white/90 sm:text-3xl">
-                Dashboard
-              </h1>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-                <span className="rounded-full border border-gray-200 bg-white/80 px-3 py-1 font-medium dark:border-gray-800 dark:bg-gray-900/70">
-                  {periodLabel ? `Période: ${periodLabel}` : "Période: personnalisée"}
-                </span>
-                {directionBadge ? (
-                  <span className="rounded-full border border-gray-200 bg-white/80 px-3 py-1 font-medium dark:border-gray-800 dark:bg-gray-900/70">
-                    {directionBadge}
-                  </span>
-                ) : null}
-                {data?.role ? (
-                  <span className="rounded-full bg-gray-900 px-3 py-1 font-medium text-white dark:bg-white/10 dark:text-white/80">
-                    Profil: {data.role}
-                  </span>
-                ) : null}
-              </div>
             </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              {data?.role ? (
+                <span className="border border-brand-200 bg-brand-50 px-2 py-1 font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                  Profil : {data.role}
+                </span>
+              ) : null}
+              {directionBadge ? (
+                <span className="border border-gray-200 bg-white px-2 py-1 text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+                  {directionBadge}
+                </span>
+              ) : null}
+              <span className="border border-gray-200 bg-white px-2 py-1 text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+                {periodLabel || "Période personnalisée"}
+              </span>
+            </div>
+          </div>
 
-            <div className="flex flex-nowrap items-end gap-3">
+          <div className="border border-gray-200 bg-white p-3 shadow-[0_1px_2px_rgba(16,24,40,0.04)] dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
               {Array.isArray(data?.directions) && data.directions.length ? (
-                <div className="relative z-10 w-[210px] rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
-                  <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
+                <div className="w-full lg:w-[240px]">
+                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 dark:text-gray-500">
                     Direction
                   </label>
-                  <div className="mt-2 w-full">
-                    <select
-                      id="dashboard-direction"
-                      className="w-full truncate rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-brand-400"
-                      value={directionId}
-                      onChange={(event) => setDirectionId(event.target.value)}
-                    >
-                      <option value="">Toutes directions</option>
-                      {data.directions.map((d) => (
-                        <option key={d.id} value={String(d.id)}>
-                          {d.nom}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <select
+                    id="dashboard-direction"
+                    className="h-10 w-full truncate border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none transition focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                    value={directionId}
+                    onChange={(event) => setDirectionId(event.target.value)}
+                  >
+                    <option value="">Toutes directions</option>
+                    {data.directions.map((d) => (
+                      <option key={d.id} value={String(d.id)}>
+                        {d.nom}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               ) : null}
-              <div className="relative z-10 w-[310px] rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
-                <label className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">
-                  Période
-                </label>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <div className="w-full">
-                    <div className="mb-1 text-[10px] font-medium uppercase text-gray-400">Du</div>
-                    <DatePicker
-                      id="dashboard-from"
-                      placeholder="YYYY-MM-DD"
-                      dateFormat="Y-m-d"
-                      defaultDate={periodStart || undefined}
-                      options={{ static: false }}
-                      onChange={(d: Date | null) => setPeriodStart(toDateString(d))}
-                    />
-                  </div>
-                  <div className="w-full">
-                    <div className="mb-1 text-[10px] font-medium uppercase text-gray-400">Au</div>
-                    <DatePicker
-                      id="dashboard-to"
-                      placeholder="YYYY-MM-DD"
-                      dateFormat="Y-m-d"
-                      defaultDate={periodEnd || undefined}
-                      options={{ static: false }}
-                      onChange={(d: Date | null) => setPeriodEnd(toDateString(d))}
-                    />
-                  </div>
+              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-[430px]">
+                <div>
+                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 dark:text-gray-500">
+                    Du
+                  </label>
+                  <DatePicker
+                    id="dashboard-from"
+                    placeholder="YYYY-MM-DD"
+                    dateFormat="Y-m-d"
+                    defaultDate={periodStart || undefined}
+                    options={{ static: false }}
+                    className="!h-10 !rounded-none !shadow-none focus:!ring-1"
+                    onChange={(d: Date | null) => setPeriodStart(toDateString(d))}
+                  />
                 </div>
+                <div>
+                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400 dark:text-gray-500">
+                    Au
+                  </label>
+                  <DatePicker
+                    id="dashboard-to"
+                    placeholder="YYYY-MM-DD"
+                    dateFormat="Y-m-d"
+                    defaultDate={periodEnd || undefined}
+                    options={{ static: false }}
+                    className="!h-10 !rounded-none !shadow-none focus:!ring-1"
+                    onChange={(d: Date | null) => setPeriodEnd(toDateString(d))}
+                  />
+                </div>
+              </div>
+              <div className="flex min-h-10 flex-1 items-center border-l-0 border-gray-200 px-0 text-xs text-gray-400 dark:border-gray-800 dark:text-gray-500 lg:border-l lg:px-4">
+                Les indicateurs sont recalculés automatiquement lorsque les filtres changent.
               </div>
             </div>
           </div>
@@ -361,7 +364,7 @@ export default function Home() {
 
         {error ? (
           <div
-            className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-[0_10px_24px_rgba(240,68,56,0.12)] dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200"
+            className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200"
             style={fadeIn(80)}
           >
             {error}
@@ -407,7 +410,7 @@ export default function Home() {
               <ChartCard title="Demandes par statut" subtitle="Nombre de demandes (période)" tone="info">
                 {(() => {
                   const rows = data.global?.demandesByStatut || [];
-                  const labels = rows.map((r: ByStatutRow) => String(r.statut));
+                  const labels = rows.map((r: ByStatutRow) => labelDemandeStatut(r.statut));
                   const series = rows.map((r: ByStatutRow) => Number(r.count || 0));
 
                   const options: ApexOptions = {
@@ -415,7 +418,7 @@ export default function Home() {
                     chart: { ...(baseChartOptions.chart || {}), type: "donut" },
                     labels,
                     colors: CHART_COLORS,
-                    legend: { ...(baseChartOptions.legend || {}), position: "bottom" },
+                    legend: { ...(baseChartOptions.legend || {}), show: false },
                     stroke: { width: 2, colors: ["transparent"] },
                     dataLabels: { ...(baseChartOptions.dataLabels || {}), enabled: true },
                     tooltip: {
@@ -443,7 +446,38 @@ export default function Home() {
                     return <EmptyState label="Aucune donnée sur la période." />;
                   }
 
-                  return <Chart options={options} series={series} type="donut" height={280} />;
+                  return (
+                    <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(280px,1.1fr)]">
+                      <Chart options={options} series={series} type="donut" height={280} />
+                      <div className="border border-gray-200 dark:border-gray-800">
+                        <div className="grid grid-cols-[minmax(0,1fr)_70px_120px] border-b border-gray-200 bg-gray-50 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-950/60">
+                          <span>Statut</span>
+                          <span className="text-right">Nombre</span>
+                          <span className="text-right">Montant</span>
+                        </div>
+                        {rows.map((row, index) => (
+                          <div
+                            key={`${row.statut}-${index}`}
+                            className="grid grid-cols-[minmax(0,1fr)_70px_120px] items-center border-b border-gray-100 px-3 py-2.5 text-xs last:border-b-0 dark:border-gray-800"
+                          >
+                            <span className="flex min-w-0 items-center gap-2 text-gray-600 dark:text-gray-300">
+                              <span
+                                className="h-2 w-2 shrink-0"
+                                style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
+                              />
+                              <span className="truncate">{labelDemandeStatut(row.statut)}</span>
+                            </span>
+                            <span className="text-right font-medium text-gray-700 dark:text-gray-200">
+                              {row.count ?? 0}
+                            </span>
+                            <span className="text-right text-gray-500 dark:text-gray-400">
+                              {formatMoney(row.montant ?? 0)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
                 })()}
               </ChartCard>
             ) : null}
@@ -469,7 +503,7 @@ export default function Home() {
                   ...baseChartOptions,
                   chart: { ...(baseChartOptions.chart || {}), type: "bar", height: 280 },
                   colors: ["var(--color-brand-500)"],
-                  plotOptions: { bar: { borderRadius: 10, columnWidth: "45%" } },
+                  plotOptions: { bar: { borderRadius: 2, columnWidth: "45%" } },
                   dataLabels: { ...(baseChartOptions.dataLabels || {}), enabled: true, offsetY: -4 },
                   xaxis: {
                     categories,
@@ -521,7 +555,7 @@ export default function Home() {
               <ChartCard title="Répartition des statuts" subtitle="Nombre de demandes par statut" tone="brand">
                 {(() => {
                   const rows = data.demandeur?.demandesByStatut || [];
-                  const labels = rows.map((r: ByStatutRow) => String(r.statut));
+                  const labels = rows.map((r: ByStatutRow) => labelDemandeStatut(r.statut));
                   const series = rows.map((r: ByStatutRow) => Number(r.count || 0));
 
                   const options: ApexOptions = {
@@ -564,7 +598,7 @@ export default function Home() {
               <ChartCard title="Montant total" subtitle="Montant par statut (FCFA)" tone="info">
                 {(() => {
                   const rows = data.demandeur?.demandesByStatut || [];
-                  const categories = rows.map((r: ByStatutRow) => String(r.statut));
+                  const categories = rows.map((r: ByStatutRow) => labelDemandeStatut(r.statut));
                   const seriesData = rows.map((r: ByStatutRow) => Number(r.montant || 0));
 
                   const options: ApexOptions = {
@@ -572,7 +606,7 @@ export default function Home() {
                     chart: { ...(baseChartOptions.chart || {}), type: "bar", height: 280 },
                     colors: ["var(--color-brand-500)"],
                     plotOptions: {
-                      bar: { columnWidth: "45%", borderRadius: 8, distributed: false },
+                      bar: { columnWidth: "45%", borderRadius: 2, distributed: false },
                     },
                     dataLabels: { ...(baseChartOptions.dataLabels || {}), enabled: false },
                     xaxis: {
@@ -648,7 +682,7 @@ export default function Home() {
                     "var(--color-error-500)",
                   ],
                   plotOptions: {
-                    bar: { distributed: true, borderRadius: 10, columnWidth: "45%" },
+                    bar: { distributed: true, borderRadius: 2, columnWidth: "45%" },
                   },
                   dataLabels: { ...(baseChartOptions.dataLabels || {}), enabled: true, offsetY: -4 },
                   xaxis: {
@@ -703,7 +737,7 @@ export default function Home() {
                   ...baseChartOptions,
                   chart: { ...(baseChartOptions.chart || {}), type: "bar", height: 280 },
                   colors: ["var(--color-brand-500)"],
-                  plotOptions: { bar: { borderRadius: 10, columnWidth: "45%" } },
+                  plotOptions: { bar: { borderRadius: 2, columnWidth: "45%" } },
                   dataLabels: { ...(baseChartOptions.dataLabels || {}), enabled: false },
                   xaxis: {
                     categories,
@@ -766,7 +800,7 @@ export default function Home() {
                   plotOptions: {
                     bar: {
                       horizontal: true,
-                      borderRadius: 10,
+                      borderRadius: 2,
                       barHeight: "70%",
                     },
                   },

@@ -57,6 +57,13 @@ export async function closeDemande(uuid) {
   return res.data;
 }
 
+export async function confirmDemandeAchatNotRequired(idOrUuid, { commentaire = "" } = {}) {
+  const res = await api.post(`/demandes/${idOrUuid}/achat/not-required`, {
+    commentaire: String(commentaire || "").trim() || null,
+  });
+  return res.data;
+}
+
 // GET /documents?demande_id=1&type_document=proforma
 export async function listDocuments(params = {}) {
   const res = await api.get("/documents", { params });

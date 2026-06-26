@@ -8,6 +8,7 @@ import {
   listAcheteurCandidates,
   assignDemandeAcheteur,
   confirmDemandeAchat,
+  confirmDemandeAchatNotRequired,
 } from "../../services/demandes.services";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
@@ -161,6 +162,8 @@ export default function DemandeDetail() {
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
   const [achatSubmitting, setAchatSubmitting] = useState(false);
+  const [achatDecisionSubmitting, setAchatDecisionSubmitting] = useState(false);
+  const [achatDecisionCommentaire, setAchatDecisionCommentaire] = useState("");
   const [achatError, setAchatError] = useState("");
   const [achatType, setAchatType] = useState("preuve_achat");
   const [achatTypeAutre, setAchatTypeAutre] = useState("");
@@ -300,11 +303,11 @@ export default function DemandeDetail() {
   const statutLower = useMemo(() => String(demande?.statut || "").toLowerCase(), [demande?.statut]);
   const isClosed = useMemo(() => ["cloture", "cloturee"].includes(statutLower), [statutLower]);
   const isRejected = useMemo(() => ["rejete", "rejetee"].includes(statutLower), [statutLower]);
+  const returnWorkflow = demande?.return_workflow || null;
   const statutEligibleForReception = useMemo(
-    () => ["approuvee", "achat_effectue"].includes(statutLower),
+    () => ["approuvee", "en_attente_paiement", "paye", "payee", "achat_effectue"].includes(statutLower),
     [statutLower]
   );
-  const isPaidStatut = useMemo(() => ["paye", "payee"].includes(statutLower), [statutLower]);
 
   const validationStopRole = useMemo(
     () => normalizeValidationStopRole(demande?.validation_stop_role),
@@ -391,11 +394,12 @@ export default function DemandeDetail() {
     (canActByAssignment || canActByDelegation || (isDirectorPending && isDirectorSameDirection));
   const canEdit = useMemo(() => {
     if (!demande || !user) return false;
-    if (!canUpdateDemande) return false;
     const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
+    if (isAModifier && returnWorkflow?.active) return returnWorkflow.can_edit === true;
+    if (!canUpdateDemande) return false;
     if (isAModifier && (isOwner || isAdmin)) return true;
     return canEditAtPending;
-  }, [demande, user, isOwner, isAdmin, canUpdateDemande, canEditAtPending]);
+  }, [demande, user, isOwner, isAdmin, canUpdateDemande, canEditAtPending, returnWorkflow]);
   const validationActionItem = useMemo(() => {
     if (!pendingValidationStep || !demande) return null;
     return { ...pendingValidationStep, demandes_paiement: demande };
@@ -418,20 +422,27 @@ export default function DemandeDetail() {
     () => receptions.some((r) => String(r?.phase || "").toUpperCase() === "APRES_PAIEMENT"),
     [receptions]
   );
-  const hasReception = receptions.length > 0;
   const hasAnyPaiement = (demande?.paiements || []).length > 0;
-  const receptionBlockedByAchat = ["en_attente_paiement", "paye", "payee"].includes(statutLower);
   const achatAssignmentLocked = useMemo(
     () => ["achat_effectue", "receptionnee", "cloture", "cloturee"].includes(statutLower),
     [statutLower]
   );
-  const canAssignAcheteur = canAssignAcheteurPerm && !isClosed && hasAnyPaiement && !achatAssignmentLocked;
+  const canAssignAcheteur =
+    canAssignAcheteurPerm &&
+    !isClosed &&
+    hasAnyPaiement &&
+    demande?.achat_requis !== false &&
+    !achatAssignmentLocked;
   const hasAchatMenuPermission = hasPermission("DEMANDE_LIST_ASSIGNED_ACHETEUR");
   const isSameDirectionAcheteur =
     user?.agent?.direction_id != null &&
     demande?.direction_id != null &&
     Number(user.agent.direction_id) === Number(demande.direction_id);
   const achatIsPending = ["en_attente_paiement", "paye", "payee"].includes(statutLower);
+  const achatDecisionPending = demande?.achat_requis == null && statutLower !== "achat_effectue";
+  const achatDecisionEligible =
+    allValidationsApproved ||
+    ["approuvee", "en_attente_paiement", "paye", "payee", "receptionnee"].includes(statutLower);
   const achatHandledByOther =
     hasAchatMenuPermission &&
     demande?.acheteur_id != null &&
@@ -441,11 +452,25 @@ export default function DemandeDetail() {
     hasAchatMenuPermission &&
     isSameDirectionAcheteur &&
     achatIsPending &&
+    demande?.achat_requis !== false &&
     (demande?.acheteur_id == null || isAssignedAcheteur) &&
     !isClosed &&
     !isRejected;
+  const canDeclareNoAchat =
+    achatDecisionPending &&
+    achatDecisionEligible &&
+    !isClosed &&
+    !isRejected &&
+    (isOwner || isAdmin || isDirectorSameDirection || (hasAchatMenuPermission && isSameDirectionAcheteur));
 
-  const canCancel = canDeleteDemande && (isOwner || isAdmin) && !hasValidationEngaged && !isClosed && !isRejected;
+  const canCancelReturned =
+    statutLower === "a_modifier" &&
+    returnWorkflow?.active &&
+    returnWorkflow.can_cancel === true;
+  const canCancel =
+    !isClosed &&
+    !isRejected &&
+    (canCancelReturned || (canDeleteDemande && (isOwner || isAdmin) && !hasValidationEngaged));
   const hasFinalReception = useMemo(
     () =>
       receptions.some(
@@ -457,13 +482,12 @@ export default function DemandeDetail() {
   const canCreateReception =
     canCreateReceptionPerm &&
     (isOwner || isAssignedAcheteur) &&
-    allValidationsApproved &&
+    achatDecisionEligible &&
     statutEligibleForReception &&
-    !receptionBlockedByAchat &&
     !isClosed &&
     !isRejected &&
     !(hasReceptionBefore && hasReceptionAfter) &&
-    !(isPaidStatut && hasReception);
+    !(hasAnyPaiement && hasReceptionAfter);
   const currentAcheteurId = demande?.acheteur_id != null ? String(demande.acheteur_id) : "";
   const hasAcheteurSelectionChanged = String(acheteurDraft || "") !== currentAcheteurId;
   const canSaveAcheteur = canAssignAcheteur && hasAcheteurSelectionChanged && !acheteurLoading && !acheteurSaving;
@@ -562,6 +586,37 @@ export default function DemandeDetail() {
     }
   };
 
+  const doConfirmAchatNotRequired = async ({ closeAfter = false } = {}) => {
+    if (!demande?.uuid || achatDecisionSubmitting) return;
+    setAchatError("");
+    setAchatDecisionSubmitting(true);
+    try {
+      const decisionRes = await confirmDemandeAchatNotRequired(demande.uuid, {
+        commentaire: achatDecisionCommentaire,
+      });
+      if (!decisionRes?.success) {
+        throw new Error(decisionRes?.message || "Confirmation impossible");
+      }
+
+      if (closeAfter) {
+        const closeRes = await closeDemande(demande.uuid);
+        if (!closeRes?.success) throw new Error(closeRes?.message || "Cloture echouee");
+        emitToast("Aucun achat nécessaire confirmé. Demande clôturée.", "success");
+      } else {
+        emitToast("Aucun achat nécessaire confirmé.", "success");
+      }
+
+      setAchatDecisionCommentaire("");
+      await fetchDemande();
+    } catch (e) {
+      const msg = e?.message || "Erreur de décision d'achat";
+      setAchatError(msg);
+      emitToast(msg, "error");
+    } finally {
+      setAchatDecisionSubmitting(false);
+    }
+  };
+
   const doUpload = async () => {
     if (!demande?.id) return;
     setUploadError("");
@@ -650,7 +705,10 @@ export default function DemandeDetail() {
   };
 
   const requestCloseDemande = () => {
-    setConfirmAction({ open: true, kind: "close" });
+    setConfirmAction({
+      open: true,
+      kind: achatDecisionPending ? "close_no_purchase" : "close",
+    });
   };
 
   const confirmConfig = useMemo(() => {
@@ -670,6 +728,25 @@ export default function DemandeDetail() {
         variant: "warn",
       };
     }
+    if (confirmAction.kind === "no_purchase") {
+      return {
+        title: "Aucun achat nécessaire",
+        message: "Veuillez confirmer que cette demande ne nécessite pas un achat.",
+        confirmLabel: "Confirmer",
+        variant: "warn",
+        showComment: true,
+      };
+    }
+    if (confirmAction.kind === "close_no_purchase") {
+      return {
+        title: "Confirmer puis clôturer",
+        message:
+          "Aucun achat n'a été enregistré. Veuillez confirmer que cette demande ne nécessite pas un achat avant la clôture.",
+        confirmLabel: "Confirmer et clôturer",
+        variant: "warn",
+        showComment: true,
+      };
+    }
     return {
       title: "Confirmation",
       message: "",
@@ -680,11 +757,19 @@ export default function DemandeDetail() {
 
   const handleConfirmAction = async () => {
     const kind = confirmAction.kind;
-    setConfirmAction({ open: false, kind: null });
-    if (kind === "cancel") {
-      await handleCancelDemande();
-    } else if (kind === "close") {
-      await handleCloseDemande();
+    try {
+      if (kind === "cancel") {
+        await handleCancelDemande();
+      } else if (kind === "close") {
+        await handleCloseDemande();
+      } else if (kind === "no_purchase") {
+        await doConfirmAchatNotRequired();
+      } else if (kind === "close_no_purchase") {
+        await doConfirmAchatNotRequired({ closeAfter: true });
+      }
+    } finally {
+      setConfirmAction({ open: false, kind: null });
+      setAchatDecisionCommentaire("");
     }
   };
 
@@ -932,8 +1017,22 @@ export default function DemandeDetail() {
             message={confirmConfig.message}
             confirmLabel={confirmConfig.confirmLabel}
             confirmVariant={confirmConfig.variant}
-            loading={confirmAction.kind === "cancel" ? cancelLoading : closeLoading}
-            onClose={() => setConfirmAction({ open: false, kind: null })}
+            loading={
+              confirmAction.kind === "cancel"
+                ? cancelLoading
+                : ["no_purchase", "close_no_purchase"].includes(confirmAction.kind)
+                  ? achatDecisionSubmitting
+                  : closeLoading
+            }
+            showComment={!!confirmConfig.showComment}
+            commentLabel="Commentaire (optionnel)"
+            commentPlaceholder="Précisez pourquoi aucun achat n'est nécessaire"
+            commentValue={achatDecisionCommentaire}
+            onCommentChange={(e) => setAchatDecisionCommentaire(e.target.value)}
+            onClose={() => {
+              setConfirmAction({ open: false, kind: null });
+              setAchatDecisionCommentaire("");
+            }}
             onConfirm={handleConfirmAction}
           />
 
@@ -1427,9 +1526,16 @@ export default function DemandeDetail() {
             </div>
           ) : null}
 
-          {hasAchatMenuPermission && isSameDirectionAcheteur ? (
+          {(hasAchatMenuPermission && isSameDirectionAcheteur) || canDeclareNoAchat || demande?.achat_requis != null ? (
             <div className="p-4 bg-white border border-gray-200 rounded-xl dark:bg-gray-900 dark:border-gray-800">
-              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Procéder à l'achat</div>
+              <div className="text-sm font-medium text-gray-800 dark:text-white/90">Décision d'achat</div>
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {demande?.achat_requis === false
+                  ? "Aucun achat nécessaire."
+                  : demande?.achat_requis === true || statutLower === "achat_effectue"
+                    ? "Achat effectué."
+                    : "Décision en attente."}
+              </div>
               {achatError ? (
                 <div className="mt-2 px-4 py-3 text-sm rounded-lg bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200">
                   {achatError}
@@ -1538,15 +1644,26 @@ export default function DemandeDetail() {
                       )}
                     </div>
                   </div>
-                  <div className="mt-3 flex justify-end">
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    {canDeclareNoAchat ? (
+                      <button
+                        type="button"
+                        disabled={achatSubmitting || achatDecisionSubmitting}
+                        onClick={() => setConfirmAction({ open: true, kind: "no_purchase" })}
+                        className="inline-flex items-center gap-2 rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                      >
+                        {achatDecisionSubmitting ? <Loader inline size="sm" label="" /> : <FiXCircle />}
+                        Aucun achat nécessaire
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      disabled={achatSubmitting || !achatFiles.length}
+                      disabled={achatSubmitting || achatDecisionSubmitting || !achatFiles.length}
                       onClick={doConfirmAchat}
                       title={achatSubmitting ? "Confirmation..." : "Confirmer achat"}
                       aria-label={achatSubmitting ? "Confirmation..." : "Confirmer achat"}
                       className={`inline-flex items-center justify-center p-2 rounded-lg ${
-                        achatSubmitting || !achatFiles.length
+                        achatSubmitting || achatDecisionSubmitting || !achatFiles.length
                           ? "bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500"
                           : "bg-emerald-600 text-white hover:opacity-90"
                       }`}
@@ -1555,9 +1672,28 @@ export default function DemandeDetail() {
                     </button>
                   </div>
                 </>
+              ) : demande?.achat_requis === false ? (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+                  Cette demande a été confirmée sans achat nécessaire
+                  {demande?.achat_decision_commentaire
+                    ? ` : ${demande.achat_decision_commentaire}`
+                    : "."}
+                </div>
               ) : achatHandledByOther ? (
                 <div className="mt-3 text-sm text-amber-700 dark:text-amber-300">
                   Achat déjà confirmé par {agentDisplayName(assignedAcheteur)}. Vous ne pouvez plus agir sur cette demande.
+                </div>
+              ) : canDeclareNoAchat ? (
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={achatDecisionSubmitting}
+                    onClick={() => setConfirmAction({ open: true, kind: "no_purchase" })}
+                    className="inline-flex items-center gap-2 rounded-lg border border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                  >
+                    {achatDecisionSubmitting ? <Loader inline size="sm" label="" /> : <FiXCircle />}
+                    Aucun achat nécessaire
+                  </button>
                 </div>
               ) : (
                 <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">

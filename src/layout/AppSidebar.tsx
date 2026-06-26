@@ -129,7 +129,7 @@ const MENU_ITEMS: MenuItem[] = [
     subItems: [
       { name: "Mes achats", path: "/achats", icon: <FileIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
       { name: "En attente", path: "/achats/pending", icon: <TimeIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
-      { name: "Effectués", path: "/achats/done", icon: <CheckCircleIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
+      { name: "Traités", path: "/achats/done", icon: <CheckCircleIcon />, permission: "DEMANDE_LIST_ASSIGNED_ACHETEUR" },
     ],
   },
   {

@@ -13,6 +13,11 @@ export async function downloadFile(url, filename, options = {}) {
   const res = await api.get(url, { responseType: "blob" });
 
   const contentType = res?.headers?.["content-type"] || "application/octet-stream";
+  if (String(contentType).toLowerCase().includes("application/json")) {
+    const payload = JSON.parse(await res.data.text());
+    throw new Error(payload?.message || "Le fichier n'a pas pu etre genere.");
+  }
+
   const blob = new Blob([res.data], { type: contentType });
 
   const objectUrl = window.URL.createObjectURL(blob);
@@ -41,5 +46,6 @@ export async function downloadFile(url, filename, options = {}) {
   a.click();
   a.remove();
 
-  window.URL.revokeObjectURL(objectUrl);
+  // Revoking immediately can cancel the download in some browsers.
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
