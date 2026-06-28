@@ -15,17 +15,19 @@ export default function OtpVerificationModal() {
       setError(null);
       setSent(false);
       setOpen(true);
-      // Envoi automatique du code à l'ouverture
       setLoading(true);
+
       try {
-        await requestOtp();
+        const result = await requestOtp();
         setSent(true);
+        if (result?.data?.code) setCode(String(result.data.code));
       } catch (err) {
         setError(err.message || "Impossible d'envoyer le code");
       } finally {
         setLoading(false);
       }
     };
+
     window.addEventListener(OTP_GATE_EVENT, handler);
     return () => window.removeEventListener(OTP_GATE_EVENT, handler);
   }, []);
@@ -33,10 +35,11 @@ export default function OtpVerificationModal() {
   async function handleResend() {
     setLoading(true);
     setError(null);
+
     try {
-      await requestOtp();
+      const result = await requestOtp();
       setSent(true);
-      setCode("");
+      setCode(result?.data?.code ? String(result.data.code) : "");
     } catch (err) {
       setError(err.message || "Impossible d'envoyer le code");
     } finally {
@@ -48,6 +51,7 @@ export default function OtpVerificationModal() {
     if (code.length !== 6) return;
     setLoading(true);
     setError(null);
+
     try {
       await verifyOtp(code);
       otpVerified();
@@ -67,9 +71,8 @@ export default function OtpVerificationModal() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">
+    <div className="fixed inset-0 z-[200000] flex items-center justify-center bg-black/50">
       <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-5">
-        {/* En-tête */}
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
@@ -78,27 +81,25 @@ export default function OtpVerificationModal() {
               </svg>
             </span>
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Vérification de sécurité
+              Verification de securite
             </h2>
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {sent
-              ? "Un code à 6 chiffres a été envoyé à votre adresse email."
-              : "Envoi du code en cours…"}
+              ? "Un code a 6 chiffres a ete envoye a votre adresse email."
+              : "Envoi du code en cours..."}
           </p>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             Requis une fois par semaine avant toute signature.
           </p>
         </div>
 
-        {/* Erreur */}
         {error && (
           <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 dark:bg-red-900/20 dark:text-red-400">
             {error}
           </div>
         )}
 
-        {/* Saisie du code */}
         <div className="space-y-3">
           <input
             type="text"
@@ -119,11 +120,10 @@ export default function OtpVerificationModal() {
             disabled={loading || code.length !== 6}
             className="w-full py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? "Vérification…" : "Valider le code"}
+            {loading ? "Verification..." : "Valider le code"}
           </button>
         </div>
 
-        {/* Renvoyer */}
         <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
           <button
             onClick={handleResend}

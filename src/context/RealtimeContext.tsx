@@ -1,7 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { useAuth } from "./AuthContext.jsx";
-import { listMyNotifications, markNotificationRead } from "../services/notifications.service";
+import {
+  listMyNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  markNotificationsRead,
+} from "../services/notifications.service";
 
 export type NotificationItem = {
   id: number;
@@ -27,6 +32,8 @@ type RealtimeContextValue = {
   loadingNotifications: boolean;
   refreshNotifications: () => Promise<void>;
   markAsRead: (notif: NotificationItem) => Promise<void>;
+  markManyAsRead: (ids: number[]) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
 };
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null);
@@ -100,6 +107,32 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       setNotifications((prev) =>
         prev.map((n) => (n.id === notif.id ? { ...n, read_at: new Date().toISOString() } : n))
       );
+    } catch {
+      // handled by api interceptor
+    }
+  }, []);
+
+  const markManyAsRead = useCallback(async (ids: number[]) => {
+    const uniqueIds = Array.from(
+      new Set((Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id)))
+    );
+    if (!uniqueIds.length) return;
+    try {
+      await markNotificationsRead(uniqueIds);
+      const readAt = new Date().toISOString();
+      setNotifications((prev) =>
+        prev.map((n) => (uniqueIds.includes(Number(n.id)) ? { ...n, read_at: n.read_at || readAt } : n))
+      );
+    } catch {
+      // handled by api interceptor
+    }
+  }, []);
+
+  const markAllAsRead = useCallback(async () => {
+    try {
+      await markAllNotificationsRead();
+      const readAt = new Date().toISOString();
+      setNotifications((prev) => prev.map((n) => ({ ...n, read_at: n.read_at || readAt })));
     } catch {
       // handled by api interceptor
     }
@@ -282,6 +315,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       loadingNotifications,
       refreshNotifications,
       markAsRead,
+      markManyAsRead,
+      markAllAsRead,
     }),
     [
       connected,
@@ -298,6 +333,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       loadingNotifications,
       refreshNotifications,
       markAsRead,
+      markManyAsRead,
+      markAllAsRead,
     ]
   );
 

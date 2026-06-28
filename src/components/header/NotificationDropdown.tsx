@@ -27,7 +27,21 @@ function formatWhen(dt: string | number | Date | null | undefined) {
 
 export default function NotificationDropdown() {
   const [isOpen, setIsOpen] = useState(false);
-  const { notifications, unreadCount, loadingNotifications, refreshNotifications, markAsRead } = useRealtime();
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const {
+    notifications,
+    unreadCount,
+    loadingNotifications,
+    refreshNotifications,
+    markAsRead,
+    markManyAsRead,
+    markAllAsRead,
+  } = useRealtime();
+
+  const visibleNotifications = notifications.slice(0, 30);
+  const selectedCount = selectedIds.length;
 
   function toggleDropdown() {
     setIsOpen(!isOpen);
@@ -35,6 +49,8 @@ export default function NotificationDropdown() {
 
   function closeDropdown() {
     setIsOpen(false);
+    setSelectionMode(false);
+    setSelectedIds([]);
   }
 
   useEffect(() => {
@@ -50,6 +66,85 @@ export default function NotificationDropdown() {
   const onRead = async (notif: NotificationItem) => {
     await markAsRead(notif);
   };
+
+  const toggleSelectionMode = () => {
+    setSelectionMode((current) => !current);
+    setSelectedIds([]);
+  };
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const selectAllVisible = () => {
+    setSelectedIds(visibleNotifications.map((n) => Number(n.id)).filter(Boolean));
+  };
+
+  const markSelectedRead = async () => {
+    if (!selectedIds.length) return;
+    setBulkLoading(true);
+    try {
+      await markManyAsRead(selectedIds);
+      setSelectedIds([]);
+      setSelectionMode(false);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const markAllRead = async () => {
+    if (!unreadCount) return;
+    setBulkLoading(true);
+    try {
+      await markAllAsRead();
+      setSelectedIds([]);
+      setSelectionMode(false);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  function renderNotificationContent(n: NotificationItem) {
+    return (
+      <>
+        {selectionMode ? (
+          <span
+            aria-hidden="true"
+            className={`mt-3 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+              selectedIds.includes(Number(n.id))
+                ? "border-brand-600 bg-brand-600"
+                : "border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-900"
+            }`}
+          />
+        ) : null}
+        <span className="relative block w-full h-10 rounded-full z-1 max-w-10">
+          <span className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-xs font-semibold text-gray-700 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-200">
+            {String(n.type || "NOTIF").slice(0, 4).toUpperCase()}
+          </span>
+          <span
+            className={`absolute bottom-0 right-0 z-10 h-2.5 w-full max-w-2.5 rounded-full border-[1.5px] border-white dark:border-gray-900 ${
+              n.read_at ? "bg-gray-300 dark:bg-gray-700" : "bg-orange-400"
+            }`}
+          ></span>
+        </span>
+
+        <span className="block">
+          <span className="mb-1.5 block text-theme-sm text-gray-700 dark:text-gray-200">
+            {n.message}
+          </span>
+
+          <span className="flex items-center gap-2 text-gray-500 text-theme-xs dark:text-gray-400">
+            <span>{String(n.type || "")}</span>
+            <span className="w-1 h-1 bg-gray-400 rounded-full"></span>
+            <span>{formatWhen(n.created_at)}</span>
+          </span>
+        </span>
+      </>
+    );
+  }
+
   return (
     <div className="relative">
       <button
@@ -87,26 +182,64 @@ export default function NotificationDropdown() {
           <h5 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
             Notifications
           </h5>
-          <button
-            onClick={toggleDropdown}
-            className="text-gray-500 transition dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          >
-            <svg
-              className="fill-current"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={markAllRead}
+              disabled={!unreadCount || bulkLoading}
+              className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
             >
-              <path
-                fillRule="evenodd"
-                clipRule="evenodd"
-                d="M6.21967 7.28131C5.92678 6.98841 5.92678 6.51354 6.21967 6.22065C6.51256 5.92775 6.98744 5.92775 7.28033 6.22065L11.999 10.9393L16.7176 6.22078C17.0105 5.92789 17.4854 5.92788 17.7782 6.22078C18.0711 6.51367 18.0711 6.98855 17.7782 7.28144L13.0597 12L17.7782 16.7186C18.0711 17.0115 18.0711 17.4863 17.7782 17.7792C17.4854 18.0721 17.0105 18.0721 16.7176 17.7792L11.999 13.0607L7.28033 17.7794C6.98744 18.0722 6.51256 18.0722 6.21967 17.7794C5.92678 17.4865 5.92678 17.0116 6.21967 16.7187L10.9384 12L6.21967 7.28131Z"
-                fill="currentColor"
-              />
-            </svg>
-          </button>
+              Tout lu
+            </button>
+            <button
+              type="button"
+              onClick={toggleSelectionMode}
+              disabled={!notifications.length || bulkLoading}
+              className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            >
+              {selectionMode ? "Annuler" : "Selectionner"}
+            </button>
+            <button
+              onClick={toggleDropdown}
+              className="text-gray-500 transition dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            >
+              <svg
+                className="fill-current"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  fillRule="evenodd"
+                  clipRule="evenodd"
+                  d="M6.21967 7.28131C5.92678 6.98841 5.92678 6.51354 6.21967 6.22065C6.51256 5.92775 6.98744 5.92775 7.28033 6.22065L11.999 10.9393L16.7176 6.22078C17.0105 5.92789 17.4854 5.92788 17.7782 6.22078C18.0711 6.51367 18.0711 6.98855 17.7782 7.28144L13.0597 12L17.7782 16.7186C18.0711 17.0115 18.0711 17.4863 17.7782 17.7792C17.4854 18.0721 17.0105 18.0721 16.7176 17.7792L11.999 13.0607L7.28033 17.7794C6.98744 18.0722 6.51256 18.0722 6.21967 17.7794C5.92678 17.4865 5.92678 17.0116 6.21967 16.7187L10.9384 12L6.21967 7.28131Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
+        {selectionMode ? (
+          <div className="mb-3 flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-white/5">
+            <button
+              type="button"
+              onClick={selectAllVisible}
+              disabled={!visibleNotifications.length || bulkLoading}
+              className="font-medium text-brand-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400"
+            >
+              Tout selectionner
+            </button>
+            <button
+              type="button"
+              onClick={markSelectedRead}
+              disabled={!selectedCount || bulkLoading}
+              className="rounded-md bg-brand-600 px-2.5 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {bulkLoading ? "Traitement..." : `Marquer lu (${selectedCount})`}
+            </button>
+          </div>
+        ) : null}
         <ul className="flex flex-col h-auto overflow-y-auto custom-scrollbar">
           {loadingNotifications ? (
             <li className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
@@ -117,42 +250,33 @@ export default function NotificationDropdown() {
               Aucune notification.
             </li>
           ) : (
-            notifications.slice(0, 30).map((n) => (
+            visibleNotifications.map((n) => (
               <li key={n.id}>
-                <DropdownItem
-                  tag="a"
-                  to={resolveNotificationLink(n)}
-                  onItemClick={() => {
-                    onRead(n);
-                    closeDropdown();
-                  }}
-                  className={`flex gap-3 rounded-lg border-b border-gray-100 p-3 px-4.5 py-3 hover:bg-gray-100 dark:border-gray-800 dark:hover:bg-white/5 ${
-                    n.read_at ? "opacity-80" : ""
-                  }`}
-                >
-                  <span className="relative block w-full h-10 rounded-full z-1 max-w-10">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-xs font-semibold text-gray-700 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-200">
-                      {String(n.type || "NOTIF").slice(0, 4).toUpperCase()}
-                    </span>
-                    <span
-                      className={`absolute bottom-0 right-0 z-10 h-2.5 w-full max-w-2.5 rounded-full border-[1.5px] border-white dark:border-gray-900 ${
-                        n.read_at ? "bg-gray-300 dark:bg-gray-700" : "bg-orange-400"
-                      }`}
-                    ></span>
-                  </span>
-
-                  <span className="block">
-                    <span className="mb-1.5 block text-theme-sm text-gray-700 dark:text-gray-200">
-                      {n.message}
-                    </span>
-
-                    <span className="flex items-center gap-2 text-gray-500 text-theme-xs dark:text-gray-400">
-                      <span>{String(n.type || "")}</span>
-                      <span className="w-1 h-1 bg-gray-400 rounded-full"></span>
-                      <span>{formatWhen(n.created_at)}</span>
-                    </span>
-                  </span>
-                </DropdownItem>
+                {selectionMode ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleSelected(Number(n.id))}
+                    className={`flex w-full gap-3 rounded-lg border-b border-gray-100 p-3 px-4.5 py-3 text-left hover:bg-gray-100 dark:border-gray-800 dark:hover:bg-white/5 ${
+                      n.read_at ? "opacity-80" : ""
+                    }`}
+                  >
+                    {renderNotificationContent(n)}
+                  </button>
+                ) : (
+                  <DropdownItem
+                    tag="a"
+                    to={resolveNotificationLink(n)}
+                    onItemClick={() => {
+                      onRead(n);
+                      closeDropdown();
+                    }}
+                    className={`flex gap-3 rounded-lg border-b border-gray-100 p-3 px-4.5 py-3 hover:bg-gray-100 dark:border-gray-800 dark:hover:bg-white/5 ${
+                      n.read_at ? "opacity-80" : ""
+                    }`}
+                  >
+                    {renderNotificationContent(n)}
+                  </DropdownItem>
+                )}
               </li>
             ))
           )}
@@ -161,7 +285,7 @@ export default function NotificationDropdown() {
           to="/"
           className="block px-4 py-2 mt-3 text-sm font-medium text-center text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
         >
-          View All Notifications
+          Voir toutes les notifications
         </Link>
       </Dropdown>
     </div>

@@ -1,6 +1,5 @@
-// Event bus pour la vérification OTP hebdomadaire.
-// Coordinate entre l'intercepteur Axios (qui détecte le besoin)
-// et OtpVerificationModal (qui affiche le code et valide).
+// Event bus pour la verification OTP hebdomadaire.
+// Coordonne l'intercepteur Axios avec le modal de saisie OTP.
 
 export const OTP_GATE_EVENT = "gp-otp-gate";
 
@@ -9,16 +8,23 @@ type Resolver = { resolve: () => void; reject: (reason?: unknown) => void };
 let pending: Resolver | null = null;
 
 export function requireOtpVerification(): Promise<void> {
-  // Si une vérification est déjà en cours, on s'y accroche
+  // Si une verification est deja en cours, toutes les requetes attendent le meme resultat.
   if (pending) {
     return new Promise((resolve, reject) => {
       const prev = pending!;
       pending = {
-        resolve: () => { prev.resolve(); resolve(); },
-        reject: (r) => { prev.reject(r); reject(r); },
+        resolve: () => {
+          prev.resolve();
+          resolve();
+        },
+        reject: (reason) => {
+          prev.reject(reason);
+          reject(reason);
+        },
       };
     });
   }
+
   return new Promise((resolve, reject) => {
     pending = { resolve, reject };
     window.dispatchEvent(new CustomEvent(OTP_GATE_EVENT));
@@ -31,6 +37,6 @@ export function otpVerified(): void {
 }
 
 export function otpCancelled(): void {
-  pending?.reject(new Error("OTP annulé"));
+  pending?.reject(new Error("OTP annule"));
   pending = null;
 }
