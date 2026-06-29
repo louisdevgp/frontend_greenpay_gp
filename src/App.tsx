@@ -50,6 +50,8 @@ import ReceptionDetail from "./pages/Receptions/ReceptionDetail";
 import SignatureTest from "./pages/Tests/SignatureTest";
 import AchatsList from "./pages/Achats/AchatsList";
 import BudgetLinesList from "./pages/Budget/BudgetLinesList";
+import ArchivesV1List from "./pages/ArchivesV1/ArchivesV1List";
+import ArchivesV1Detail from "./pages/ArchivesV1/ArchivesV1Detail";
 import OtpVerificationModal from "./components/common/OtpVerificationModal";
 
 // admin
@@ -123,6 +125,10 @@ export default function App() {
               {/* Demandes */}
               <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_ASSIGNED_ACHETEUR"]} />}>
                 <Route path="/demandes/all" element={<DemandesAllList />} />
+              </Route>
+              <Route element={<PermissionGuard allow={["ARCHIVES_V1_VIEW"]} />}>
+                <Route path="/archives-v1/demandes" element={<ArchivesV1List />} />
+                <Route path="/archives-v1/demandes/:id" element={<ArchivesV1Detail />} />
               </Route>
               <Route element={<PermissionGuard allow={["DEMANDE_LIST_SELF"]} />}>
                 <Route path="/demandes/my" element={<DemandesMyList />} />
@@ -218,4 +224,3 @@ export default function App() {
     </Router>
   );
 }
-

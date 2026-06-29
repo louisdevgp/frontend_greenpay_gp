@@ -24,6 +24,7 @@ export function labelDemandeStatut(statut) {
     validation_responsable: "Validation Responsable",
     validation_section: "Validation Section",
     validation_entite: "Validation Entite",
+    validation_entite_finance: "Validation Entite Finance",
     validation_entite_generale: "Validation Entite Generale",
     validation_directeur: "Validation Directeur",
     validation_daf: "Validation DAF",
@@ -32,6 +33,7 @@ export function labelDemandeStatut(statut) {
 
     en_attente_paiement: "En attente de paiement",
     achat_effectue: "Achat effectue",
+    approuve: "Approuvee",
     approuvee: "Approuvee",
     paye: "Payee",
     receptionnee: "Receptionnee",
@@ -48,6 +50,8 @@ export function labelValidationStepStatus(status) {
   if (!k) return "-";
 
   const map = {
+    approuve: "Approuvee",
+    approuvee: "Approuvee",
     valide: "Validee",
     en_attente: "En attente",
     bloque: "Bloquee",
@@ -91,13 +95,14 @@ export function demandeStatusBadgeClass(statut) {
   if (k === "validation_responsable") return classes.blue;
   if (k === "validation_section") return classes.cyan;
   if (k === "validation_entite") return classes.indigo;
+  if (k === "validation_entite_finance") return classes.yellow;
   if (k === "validation_entite_generale") return classes.violet;
   if (k === "validation_directeur") return classes.orange;
   if (k === "validation_daf") return classes.yellow;
   if (k === "validation_dga") return classes.rose;
   if (k === "validation_dg") return classes.teal;
   if (k === "en_cours_validation" || k.startsWith("validation_")) return classes.indigo;
-  if (k === "approuvee") return classes.green;
+  if (k === "approuve" || k === "approuvee") return classes.green;
   if (k === "en_attente_paiement") return classes.fuchsia;
   if (k === "achat_effectue") return classes.violet;
   if (k === "paye" || k === "payee") return classes.emerald;
