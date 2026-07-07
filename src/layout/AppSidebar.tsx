@@ -96,7 +96,13 @@ const MENU_ITEMS: MenuItem[] = [
         icon: <FolderIcon />,
         permission: "ARCHIVES_V1_VIEW",
       },
-      { name: "Nouvelle demande", path: "/demandes/create", icon: <PlusIcon />, permission: "DEMANDE_CREATE", new: true },
+      {
+        name: "Nouvelle demande",
+        path: "/demandes/create",
+        icon: <PlusIcon />,
+        permissions: ["DEMANDE_CREATE", "DEMANDE_CREATE_FOR_AGENT"],
+        new: true,
+      },
     ],
   },
   {

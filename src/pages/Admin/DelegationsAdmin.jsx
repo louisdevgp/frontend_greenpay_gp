@@ -17,6 +17,33 @@ import {
 } from "../../services/delegations.admin.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
 
+function toLocalDateTimeValue(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatDateTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+const dateTimePickerOptions = {
+  enableTime: true,
+  time_24hr: true,
+  minuteIncrement: 1,
+  altInput: true,
+  altFormat: "d/m/Y H:i",
+};
+
 export default function DelegationsAdmin() {
   const { user, hasAnyRole } = useAuth();
   const isAdmin = hasAnyRole(["ADMIN"]);
@@ -86,14 +113,65 @@ export default function DelegationsAdmin() {
     return (agents || []).find((x) => String(x.id) === String(form.principal_id)) || null;
   }, [agents, form.principal_id]);
 
+  const orgLabelMaps = useMemo(() => {
+    const directions = new Map();
+    const departements = new Map();
+    const services = new Map();
+
+    (agents || []).forEach((agent) => {
+      if (agent.direction_id) {
+        directions.set(String(agent.direction_id), agent.directions?.nom || `Direction ${agent.direction_id}`);
+      }
+      if (agent.departement_id) {
+        departements.set(String(agent.departement_id), agent.departements?.nom || `Département ${agent.departement_id}`);
+      }
+      if (agent.service_id) {
+        services.set(String(agent.service_id), agent.services?.nom || `Service ${agent.service_id}`);
+      }
+    });
+
+    return { directions, departements, services };
+  }, [agents]);
+
+  const formatScopeLabel = (scope, delegation = null) => {
+    const raw = String(scope || "GLOBAL").trim();
+    if (!raw || raw.toUpperCase() === "GLOBAL") return "Global";
+
+    const [typeRaw, idRaw] = raw.split(":");
+    const type = String(typeRaw || "").toUpperCase();
+    const id = String(idRaw || "");
+    const principal = delegation?.agents_delegations_principal_idToagents || null;
+
+    if (type === "DIRECTION") {
+      if (String(principal?.direction_id || "") === id && principal?.directions?.nom) {
+        return principal.directions.nom;
+      }
+      return orgLabelMaps.directions.get(id) || `Direction ${id}`;
+    }
+    if (type === "DEPARTEMENT") {
+      if (String(principal?.departement_id || "") === id && principal?.departements?.nom) {
+        return principal.departements.nom;
+      }
+      return orgLabelMaps.departements.get(id) || `Département ${id}`;
+    }
+    if (type === "SERVICE") {
+      if (String(principal?.service_id || "") === id && principal?.services?.nom) {
+        return principal.services.nom;
+      }
+      return orgLabelMaps.services.get(id) || `Service ${id}`;
+    }
+
+    return raw;
+  };
+
   const scopeOptions = useMemo(() => {
     const opts = [{ value: "", label: "Auto (recommandé)" }, { value: "GLOBAL", label: "Global" }];
     const dir = principalAgent?.direction_id;
     const dep = principalAgent?.departement_id;
     const svc = principalAgent?.service_id;
-    if (dir) opts.push({ value: `DIRECTION:${dir}`, label: "Direction" });
-    if (dep) opts.push({ value: `DEPARTEMENT:${dep}`, label: "Département" });
-    if (svc) opts.push({ value: `SERVICE:${svc}`, label: "Service" });
+    if (dir) opts.push({ value: `DIRECTION:${dir}`, label: principalAgent?.directions?.nom || `Direction ${dir}` });
+    if (dep) opts.push({ value: `DEPARTEMENT:${dep}`, label: principalAgent?.departements?.nom || `Département ${dep}` });
+    if (svc) opts.push({ value: `SERVICE:${svc}`, label: principalAgent?.services?.nom || `Service ${svc}` });
     return opts;
   }, [principalAgent]);
 
@@ -121,11 +199,18 @@ export default function DelegationsAdmin() {
     });
     return map;
   }, [agents]);
+
+  const canManageDelegation = (delegation) => {
+    return isAdmin || String(delegation?.principal_id || "") === String(myAgentId || "");
+  };
+
   const exportColumns = [
     { header: "Principal", value: (d) => agentLabel.get(d.principal_id) || d.principal_id || "-" },
     { header: "Délégué", value: (d) => agentLabel.get(d.delegate_id) || d.delegate_id || "-" },
     { header: "Rôle", value: (d) => d?.role_name || "-" },
-    { header: "Portée", value: (d) => d?.scope || "GLOBAL" },
+    { header: "Portée", value: (d) => formatScopeLabel(d?.scope, d) },
+    { header: "Début", value: (d) => formatDateTime(d?.start_at) },
+    { header: "Fin", value: (d) => formatDateTime(d?.end_at) },
     { header: "Actif", value: (d) => (d?.is_active ? "Oui" : "Non") },
   ];
   const handleExport = () => {
@@ -139,14 +224,14 @@ export default function DelegationsAdmin() {
   };
 
   const save = async () => {
-    if (!form.principal_id || !form.delegate_id || !form.role_name || !form.end_at) {
-      emitToast({ variant: "error", message: "Principal, délégué, rôle et fin sont obligatoires" });
+    if (!form.principal_id || !form.delegate_id || !form.role_name || !form.start_at || !form.end_at) {
+      emitToast({ variant: "error", message: "Principal, délégué, rôle, début et fin sont obligatoires" });
       return;
     }
 
     setSaving(true);
     try {
-      const startIso = form.start_at ? new Date(form.start_at).toISOString() : new Date().toISOString();
+      const startIso = new Date(form.start_at).toISOString();
       const endIso = new Date(form.end_at).toISOString();
 
       const payload = {
@@ -187,28 +272,21 @@ export default function DelegationsAdmin() {
 
   const openEdit = (row) => {
     setEditRow(row);
-    const start = row?.start_at ? new Date(row.start_at) : null;
-    const end = row?.end_at ? new Date(row.end_at) : null;
-    const toLocalInput = (d) => {
-      if (!d || Number.isNaN(d.getTime())) return "";
-      const pad = (n) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
-    setEditForm({ start_at: toLocalInput(start), end_at: toLocalInput(end) });
+    setEditForm({ start_at: toLocalDateTimeValue(row?.start_at), end_at: toLocalDateTimeValue(row?.end_at) });
     setEditOpen(true);
   };
 
   const saveEdit = async () => {
     if (!editRow) return;
-    if (!editForm.end_at) {
-      emitToast({ variant: "error", message: "Fin obligatoire" });
+    if (!editForm.start_at || !editForm.end_at) {
+      emitToast({ variant: "error", message: "Début et fin obligatoires" });
       return;
     }
 
     setSaving(true);
     try {
       const payload = {
-        start_at: editForm.start_at ? new Date(editForm.start_at).toISOString() : undefined,
+        start_at: new Date(editForm.start_at).toISOString(),
         end_at: new Date(editForm.end_at).toISOString(),
       };
 
@@ -265,8 +343,11 @@ export default function DelegationsAdmin() {
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
             />            <button
               onClick={() => {
+                const defaultStart = form.start_at || toLocalDateTimeValue();
                 if (!isAdmin && myAgentId) {
-                  setForm((p) => ({ ...p, principal_id: myAgentId }));
+                  setForm((p) => ({ ...p, principal_id: myAgentId, start_at: p.start_at || defaultStart }));
+                } else {
+                  setForm((p) => ({ ...p, start_at: p.start_at || defaultStart }));
                 }
                 setCreateOpen(true);
               }}
@@ -291,6 +372,8 @@ export default function DelegationsAdmin() {
                 <th className="px-4 py-3">Délégué</th>
                 <th className="px-4 py-3">Rôle</th>
                 <th className="px-4 py-3">Portée</th>
+                <th className="px-4 py-3">Début</th>
+                <th className="px-4 py-3">Fin</th>
                 <th className="px-4 py-3">Actif</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -298,7 +381,7 @@ export default function DelegationsAdmin() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={6}>
+                  <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={8}>
                     Aucune délégation.
                   </td>
                 </tr>
@@ -308,27 +391,37 @@ export default function DelegationsAdmin() {
                     <td className="px-4 py-3">{agentLabel.get(d.principal_id) || d.principal_id}</td>
                     <td className="px-4 py-3">{agentLabel.get(d.delegate_id) || d.delegate_id}</td>
                     <td className="px-4 py-3">{d.role_name}</td>
-                    <td className="px-4 py-3">{d.scope || "GLOBAL"}</td>
+                    <td className="px-4 py-3">{formatScopeLabel(d.scope, d)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(d.start_at)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(d.end_at)}</td>
                     <td className="px-4 py-3">{d.is_active ? "Oui" : "Non"}</td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => openEdit(d)}
-                        className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
-                      >
-                        Modifier période
-                      </button>
-                      <button
-                        onClick={() => toggle(d.uuid || d.id)}
-                        className="ml-2 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
-                      >
-                        Activer/Désactiver
-                      </button>
-                      <button
-                        onClick={() => askRemove(d)}
-                        className="ml-2 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
-                      >
-                        Supprimer
-                      </button>
+                      {canManageDelegation(d) ? (
+                        <>
+                          <button
+                            onClick={() => openEdit(d)}
+                            className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+                          >
+                            Modifier période
+                          </button>
+                          <button
+                            onClick={() => toggle(d.uuid || d.id)}
+                            className="ml-2 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+                          >
+                            Activer/Désactiver
+                          </button>
+                          <button
+                            onClick={() => askRemove(d)}
+                            className="ml-2 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+                          >
+                            Supprimer
+                          </button>
+                        </>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                          Lecture seule
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -411,7 +504,7 @@ export default function DelegationsAdmin() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label className="block text-xs text-gray-500 dark:text-gray-400">Rôle</label>
               <select
@@ -439,24 +532,24 @@ export default function DelegationsAdmin() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400">Début</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400">Début *</label>
               <DatePicker
                 id="delegations-create-start"
-                placeholder="YYYY-MM-DDTHH:mm"
+                placeholder="JJ/MM/AAAA HH:mm"
                 dateFormat="Y-m-d\\TH:i"
-                defaultDate={form.start_at || undefined}
-                options={{ enableTime: true, time_24hr: true }}
+                value={form.start_at || null}
+                options={dateTimePickerOptions}
                 onChange={(_, dateStr) => setForm((p) => ({ ...p, start_at: dateStr }))}
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400">Fin</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400">Fin *</label>
               <DatePicker
                 id="delegations-create-end"
-                placeholder="YYYY-MM-DDTHH:mm"
+                placeholder="JJ/MM/AAAA HH:mm"
                 dateFormat="Y-m-d\\TH:i"
-                defaultDate={form.end_at || undefined}
-                options={{ enableTime: true, time_24hr: true }}
+                value={form.end_at || null}
+                options={dateTimePickerOptions}
                 onChange={(_, dateStr) => setForm((p) => ({ ...p, end_at: dateStr }))}
               />
             </div>
@@ -472,7 +565,7 @@ export default function DelegationsAdmin() {
             </button>
             <button
               onClick={save}
-              disabled={saving || !form.principal_id || !form.delegate_id || !form.role_name || !form.end_at}
+              disabled={saving || !form.principal_id || !form.delegate_id || !form.role_name || !form.start_at || !form.end_at}
               className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50"
             >
               {saving ? <Loader inline size="sm" label="Traitement..." /> : "Créer"}
@@ -515,10 +608,10 @@ export default function DelegationsAdmin() {
               <label className="block text-xs text-gray-500 dark:text-gray-400">Début</label>
               <DatePicker
                 id="delegations-edit-start"
-                placeholder="YYYY-MM-DDTHH:mm"
+                placeholder="JJ/MM/AAAA HH:mm"
                 dateFormat="Y-m-d\\TH:i"
-                defaultDate={editForm.start_at || undefined}
-                options={{ enableTime: true, time_24hr: true }}
+                value={editForm.start_at || null}
+                options={dateTimePickerOptions}
                 onChange={(_, dateStr) => setEditForm((p) => ({ ...p, start_at: dateStr }))}
               />
             </div>
@@ -526,10 +619,10 @@ export default function DelegationsAdmin() {
               <label className="block text-xs text-gray-500 dark:text-gray-400">Fin *</label>
               <DatePicker
                 id="delegations-edit-end"
-                placeholder="YYYY-MM-DDTHH:mm"
+                placeholder="JJ/MM/AAAA HH:mm"
                 dateFormat="Y-m-d\\TH:i"
-                defaultDate={editForm.end_at || undefined}
-                options={{ enableTime: true, time_24hr: true }}
+                value={editForm.end_at || null}
+                options={dateTimePickerOptions}
                 onChange={(_, dateStr) => setEditForm((p) => ({ ...p, end_at: dateStr }))}
               />
             </div>
@@ -548,7 +641,7 @@ export default function DelegationsAdmin() {
             </button>
             <button
               onClick={saveEdit}
-              disabled={saving}
+              disabled={saving || !editForm.start_at || !editForm.end_at}
               className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700"
             >
               {saving ? <Loader inline size="sm" label="Traitement..." /> : "Enregistrer"}

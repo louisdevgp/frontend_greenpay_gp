@@ -120,7 +120,7 @@ export default function DemandesMyList() {
     return (filtered || []).slice(start, start + state.pageSize);
   }, [filtered, state.page, state.pageSize]);
 
-  const canCreate = hasPermission("DEMANDE_CREATE");
+  const canCreate = hasAnyPermission(["DEMANDE_CREATE", "DEMANDE_CREATE_FOR_AGENT"]);
   const canViewDetails = hasAnyPermission([
     "DEMANDE_LIST",
     "DEMANDE_LIST_SELF",

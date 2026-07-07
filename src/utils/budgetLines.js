@@ -1,8 +1,35 @@
 import { formatMoney } from "./formatUtils";
 
+export const BUDGET_MONTHS = [
+  { value: 1, label: "Janvier" },
+  { value: 2, label: "Fevrier" },
+  { value: 3, label: "Mars" },
+  { value: 4, label: "Avril" },
+  { value: 5, label: "Mai" },
+  { value: 6, label: "Juin" },
+  { value: 7, label: "Juillet" },
+  { value: 8, label: "Aout" },
+  { value: 9, label: "Septembre" },
+  { value: 10, label: "Octobre" },
+  { value: 11, label: "Novembre" },
+  { value: 12, label: "Decembre" },
+];
+
 export function numberValue(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+export function budgetMonthLabel(value) {
+  const n = Number(value);
+  return BUDGET_MONTHS.find((m) => Number(m.value) === n)?.label || "-";
+}
+
+export function budgetPeriodLabel(line) {
+  if (!line) return "-";
+  const exercice = line.exercice || "-";
+  const mois = budgetMonthLabel(line.mois || 1);
+  return `${mois} ${exercice}`;
 }
 
 export function budgetLineSolde(line) {
@@ -15,7 +42,8 @@ export function budgetLineLabel(line) {
   if (!line) return "-";
   const code = line.code || `Ligne #${line.id}`;
   const libelle = line.libelle ? ` - ${line.libelle}` : "";
-  return `${code}${libelle}`;
+  const period = line.exercice ? ` (${budgetPeriodLabel(line)})` : "";
+  return `${code}${libelle}${period}`;
 }
 
 export function budgetLineOptionLabel(line) {

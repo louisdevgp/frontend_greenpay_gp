@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from "react-icons/fi";
+import { FiCopy, FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from "react-icons/fi";
 import PageMeta from "../../components/common/PageMeta";
 import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
@@ -15,17 +15,19 @@ import {
   createBudgetLine,
   deleteBudgetLine,
   listBudgetLines,
+  renewBudgetLine,
   updateBudgetLine,
 } from "../../services/budgetLines.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
 import { formatDateTime, formatMoney } from "../../utils/formatUtils";
-import { budgetLineSolde } from "../../utils/budgetLines";
+import { BUDGET_MONTHS, budgetLineSolde, budgetMonthLabel, budgetPeriodLabel } from "../../utils/budgetLines";
 import { clearPersistedState, loadPersistedState, savePersistedState } from "../../utils/persistedFilters";
 
 const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_MONTH = new Date().getMonth() + 1;
 const EXERCICE_OPTIONS = Array.from({ length: 8 }, (_, index) => CURRENT_YEAR + 2 - index);
 const STORAGE_KEY = "filters:budget:lignes";
-const INITIAL_FILTERS = { q: "", exercice: String(CURRENT_YEAR), statut: "" };
+const INITIAL_FILTERS = { q: "", exercice: String(CURRENT_YEAR), mois: "", statut: "" };
 
 function initialForm() {
   return {
@@ -33,6 +35,7 @@ function initialForm() {
     libelle: "",
     description: "",
     exercice: String(CURRENT_YEAR),
+    mois: String(CURRENT_MONTH),
     devise: "FCFA",
     montant_initial: "",
     controle_mode: "SOUPLE",
@@ -64,6 +67,8 @@ export default function BudgetLinesList() {
   const [scopeLoading, setScopeLoading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [renewOpen, setRenewOpen] = useState(false);
+  const [renewTarget, setRenewTarget] = useState(null);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -72,6 +77,7 @@ export default function BudgetLinesList() {
       const params = {};
       if (filters.q) params.q = filters.q;
       if (filters.exercice) params.exercice = filters.exercice;
+      if (filters.mois) params.mois = filters.mois;
       if (filters.statut) params.statut = filters.statut;
       const res = await listBudgetLines(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement lignes budgetaires");
@@ -165,6 +171,7 @@ export default function BudgetLinesList() {
       libelle: row?.libelle || "",
       description: row?.description || "",
       exercice: String(row?.exercice || CURRENT_YEAR),
+      mois: String(row?.mois || CURRENT_MONTH),
       devise: row?.devise || "FCFA",
       montant_initial: row?.montant_initial != null ? String(row.montant_initial) : "",
       controle_mode: row?.controle_mode || "SOUPLE",
@@ -203,6 +210,7 @@ export default function BudgetLinesList() {
       libelle,
       description: String(form.description || "").trim() || null,
       exercice: Number(form.exercice || CURRENT_YEAR),
+      mois: Number(form.mois || CURRENT_MONTH),
       devise: String(form.devise || "FCFA").trim().toUpperCase(),
       montant_initial: montantInitial,
       controle_mode: form.controle_mode,
@@ -255,6 +263,28 @@ export default function BudgetLinesList() {
     }
   };
 
+  const requestRenew = (row) => {
+    setRenewTarget(row || null);
+    setRenewOpen(true);
+  };
+
+  const confirmRenew = async () => {
+    if (!renewTarget?.id && !renewTarget?.uuid) return;
+    setSaving(true);
+    try {
+      const res = await renewBudgetLine(renewTarget.uuid || renewTarget.id);
+      if (!res?.success) throw new Error(res?.message || "Erreur reconduction ligne budgetaire");
+      emitToast({ variant: "success", message: "Ligne budgetaire reconduite" });
+      await fetchAll();
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur reconduction ligne budgetaire" });
+    } finally {
+      setSaving(false);
+      setRenewOpen(false);
+      setRenewTarget(null);
+    }
+  };
+
   const handleExport = () => {
     const dateTag = new Date().toISOString().slice(0, 10);
     exportRowsToExcel({
@@ -265,6 +295,7 @@ export default function BudgetLinesList() {
         { header: "Code", value: (r) => r?.code || "-" },
         { header: "Libelle", value: (r) => r?.libelle || "-" },
         { header: "Exercice", value: (r) => r?.exercice || "-" },
+        { header: "Mois", value: (r) => budgetMonthLabel(r?.mois || 1) },
         { header: "Montant initial", value: (r) => Number(r?.montant_initial || 0) },
         { header: "Engage", value: (r) => Number(r?.montant_engage || 0) },
         { header: "Paye", value: (r) => Number(r?.montant_paye || 0) },
@@ -324,7 +355,7 @@ export default function BudgetLinesList() {
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <input
               value={filters.q}
               onChange={(e) => updateFilter("q", e.target.value)}
@@ -340,6 +371,18 @@ export default function BudgetLinesList() {
               {buildExerciceOptions(filters.exercice).map((year) => (
                 <option key={year} value={year}>
                   {year}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.mois}
+              onChange={(e) => updateFilter("mois", e.target.value)}
+              className="px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              <option value="">Tous mois</option>
+              {BUDGET_MONTHS.map((month) => (
+                <option key={month.value} value={month.value}>
+                  {month.label}
                 </option>
               ))}
             </select>
@@ -383,7 +426,7 @@ export default function BudgetLinesList() {
             <thead>
               <tr className="text-left text-gray-500 dark:text-gray-400">
                 <th className="px-4 py-3">Ligne</th>
-                <th className="px-4 py-3">Exercice</th>
+                <th className="px-4 py-3">Periode</th>
                 <th className="px-4 py-3 text-right">Initial</th>
                 <th className="px-4 py-3 text-right">Engage</th>
                 <th className="px-4 py-3 text-right">Paye</th>
@@ -410,7 +453,7 @@ export default function BudgetLinesList() {
                         <div className="font-medium text-gray-900 dark:text-white/90">{row.code}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">{row.libelle}</div>
                       </td>
-                      <td className="px-4 py-3">{row.exercice}</td>
+                      <td className="px-4 py-3">{budgetPeriodLabel(row)}</td>
                       <td className="px-4 py-3 text-right">{formatMoney(row.montant_initial)}</td>
                       <td className="px-4 py-3 text-right">{formatMoney(row.montant_engage)}</td>
                       <td className="px-4 py-3 text-right">{formatMoney(row.montant_paye)}</td>
@@ -426,6 +469,17 @@ export default function BudgetLinesList() {
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{formatDateTime(row.updated_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
+                          {canCreate ? (
+                            <button
+                              type="button"
+                              onClick={() => requestRenew(row)}
+                              className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 dark:border-gray-800"
+                              title="Reconduire au mois suivant"
+                              aria-label="Reconduire au mois suivant"
+                            >
+                              <FiCopy />
+                            </button>
+                          ) : null}
                           {canUpdate ? (
                             <button
                               type="button"
@@ -489,6 +543,24 @@ export default function BudgetLinesList() {
         }}
         onConfirm={confirmDelete}
       />
+
+      <ConfirmActionModal
+        open={renewOpen}
+        title="Reconduire la ligne budgetaire"
+        message={
+          renewTarget?.code
+            ? `Creer une nouvelle ligne pour le mois suivant a partir de "${renewTarget.code}" ? Le budget initial sera repris, sans reporter le solde restant.`
+            : "Creer une nouvelle ligne pour le mois suivant ? Le budget initial sera repris, sans reporter le solde restant."
+        }
+        confirmLabel="Reconduire"
+        loading={saving}
+        onClose={() => {
+          if (saving) return;
+          setRenewOpen(false);
+          setRenewTarget(null);
+        }}
+        onConfirm={confirmRenew}
+      />
     </>
   );
 }
@@ -544,6 +616,19 @@ function BudgetLineModal({ open, editing, form, setForm, scopeOptions, scopeLoad
               {buildExerciceOptions(form.exercice).map((year) => (
                 <option key={year} value={year}>
                   {year}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Mois">
+            <select
+              value={form.mois}
+              onChange={(e) => setForm((p) => ({ ...p, mois: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              {BUDGET_MONTHS.map((month) => (
+                <option key={month.value} value={month.value}>
+                  {month.label}
                 </option>
               ))}
             </select>

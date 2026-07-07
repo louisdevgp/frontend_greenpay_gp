@@ -1,11 +1,12 @@
 ﻿import React, { useState, useMemo } from "react";
-import { createDemande } from "../../services/demandes.services";
+import { createDemande, listCreateForAgentCandidates } from "../../services/demandes.services";
 import { Modal } from "../../components/ui/modal";
 import { emitToast } from "../../services/toastBus";
 import { formatMoney } from "../../utils/formatUtils";
 import { useDropzone } from "react-dropzone";
 import { uploadManyDocuments } from "../../services/documents.service";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
+import { useAuth } from "../../context/AuthContext";
 import {
   MAX_UPLOAD_SIZE_BYTES,
   buildFileTooLargeMessage,
@@ -36,7 +37,15 @@ function isItemActive(it) {
   return designation || unite || hasQty || puStr;
 }
 
+function agentOptionLabel(agent) {
+  const name = `${agent?.prenom || ""} ${agent?.nom || ""}`.trim() || agent?.email || `Agent #${agent?.id}`;
+  const parts = [agent?.role, agent?.direction, agent?.departement, agent?.service].filter(Boolean);
+  return parts.length ? `${name} - ${parts.join(" / ")}` : name;
+}
+
 export default function CreateDemandeModal({ open, onClose, onCreated }) {
+  const { hasAnyPermission } = useAuth();
+  const canLoadCreateForAgents = hasAnyPermission(["DEMANDE_CREATE", "DEMANDE_CREATE_FOR_AGENT"]);
   const [form, setForm] = useState({
     motif: "",
     description: "",
@@ -58,6 +67,10 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
   const [uploadTypeAutre, setUploadTypeAutre] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
   const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [createForAgentId, setCreateForAgentId] = useState("");
+  const [createForAgents, setCreateForAgents] = useState([]);
+  const [createForAgentsLoading, setCreateForAgentsLoading] = useState(false);
+  const showCreateForAgent = createForAgents.length > 0;
 
   const itemsTotal = useMemo(() => {
     return form.items.reduce((acc, it) => {
@@ -110,6 +123,37 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
       return { ...p, montant: String(rounded) };
     });
   }, [hasItems, itemsTotal]);
+
+  React.useEffect(() => {
+    if (!open || !canLoadCreateForAgents) {
+      setCreateForAgentId("");
+      setCreateForAgents([]);
+      return;
+    }
+
+    let cancelled = false;
+    setCreateForAgentsLoading(true);
+    listCreateForAgentCandidates({ limit: 500 })
+      .then((res) => {
+        if (cancelled) return;
+        setCreateForAgents(res?.success ? res.data || [] : []);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setCreateForAgents([]);
+        emitToast({
+          variant: "error",
+          message: e?.message || "Impossible de charger les demandeurs autorises",
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setCreateForAgentsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, canLoadCreateForAgents]);
 
   const setField = (field, value) => {
     setForm((p) => ({ ...p, [field]: value }));
@@ -256,6 +300,8 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
     setUploadType("proforma");
     setUploadTypeAutre("");
     setUploadFiles([]);
+    setCreateForAgentId("");
+    setCreateForAgents([]);
     setErrors({});
     setLoading(false);
   };
@@ -298,6 +344,7 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
             unite: it.unite.trim() || null,
           }))
           .filter((it) => it.designation), // Supprimer les lignes vides
+        ...(createForAgentId ? { demandeur_id: Number(createForAgentId) } : {}),
         ...(customConditions.length ? { conditions_paiement_custom: customConditions } : {}),
       };
 
@@ -382,6 +429,29 @@ export default function CreateDemandeModal({ open, onClose, onCreated }) {
           <h2 className="text-lg font-medium text-gray-800 dark:text-white/90 mb-4">Informations générales</h2>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {showCreateForAgent ? (
+              <div className="sm:col-span-2">
+                <Field label="Demandeur delegant">
+                  <select
+                    value={createForAgentId}
+                    onChange={(e) => setCreateForAgentId(e.target.value)}
+                    disabled={createForAgentsLoading}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800 disabled:opacity-60"
+                  >
+                    <option value="">Moi-même</option>
+                    {createForAgents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agentOptionLabel(agent)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    La liste affiche uniquement les personnes qui vous ont delegue une action active. Sans selection, la demande est creee pour vous.
+                  </p>
+                </Field>
+              </div>
+            ) : null}
+
             <Field label="Motif *" error={errors.motif}>
               <input
                 type="text"

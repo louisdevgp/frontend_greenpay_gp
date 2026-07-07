@@ -133,10 +133,10 @@ export default function App() {
               <Route element={<PermissionGuard allow={["DEMANDE_LIST_SELF"]} />}>
                 <Route path="/demandes/my" element={<DemandesMyList />} />
               </Route>
-              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_SELF", "DEMANDE_LIST_ASSIGNED_ACHETEUR", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE"]} />}>
+              <Route element={<PermissionGuard allow={["DEMANDE_LIST", "DEMANDE_LIST_ALL", "DEMANDE_LIST_SELF", "DEMANDE_LIST_ASSIGNED_ACHETEUR", "VALIDATION_LIST_PENDING", "VALIDATION_LIST_DONE", "DEMANDE_CREATE_FOR_AGENT"]} />}>
                 <Route path="/demandes/:uuid" element={<DemandeDetail />} />
               </Route>
-              <Route element={<PermissionGuard allow={["DEMANDE_CREATE"]} />}>
+              <Route element={<PermissionGuard allow={["DEMANDE_CREATE", "DEMANDE_CREATE_FOR_AGENT"]} />}>
                 <Route path="/demandes/create" element={<CreateDemande />} />
               </Route>
 
@@ -165,7 +165,7 @@ export default function App() {
               </Route>
 
               {/* Tests */}
-              <Route element={<PermissionGuard allow={["VALIDATION_APPROVE", "DEMANDE_CREATE"]} />}>
+              <Route element={<PermissionGuard allow={["VALIDATION_APPROVE", "DEMANDE_CREATE", "DEMANDE_CREATE_FOR_AGENT"]} />}>
                 <Route path="/tests/signature" element={<SignatureTest />} />
               </Route>
 

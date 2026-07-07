@@ -343,6 +343,11 @@ export default function DemandeDetail() {
   }, [effectiveValidationSteps]);
 
   const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
+  const canViewDafValidationFields =
+    isAdmin ||
+    roles.includes("DAF") ||
+    delegatedRoles.includes("DAF") ||
+    hasPermission("DEMANDE_DAF_FIELDS_VIEW");
   const pendingRole = String(pendingValidationStep?.role_name || "").toUpperCase();
   const canActByAssignment =
     pendingValidationStep?.validator_id != null &&
@@ -352,6 +357,16 @@ export default function DemandeDetail() {
     () => candidateScopesForDemande(demande),
     [demande?.direction_id, demande?.departement_id, demande?.service_id]
   );
+  const isDelegatedDemandeur = useMemo(() => {
+    if (!demande?.demandeur_id) return false;
+    const delegations = user?.agent?.delegations || [];
+    if (!delegations.length) return false;
+    return delegations.some((d) => {
+      if (Number(d?.principal_id) !== Number(demande.demandeur_id)) return false;
+      const scope = d?.scope != null && String(d.scope).trim() !== "" ? String(d.scope).trim() : "GLOBAL";
+      return scope.toUpperCase() === "GLOBAL" || candidateScopes.includes(scope);
+    });
+  }, [demande?.demandeur_id, user?.agent?.delegations, candidateScopes]);
   const canActByDelegation = useMemo(() => {
     if (!pendingValidationStep || !pendingRole) return false;
     const delegations = user?.agent?.delegations || [];
@@ -482,7 +497,7 @@ export default function DemandeDetail() {
   const canClose = canCloseDemande && (isOwner || isAdmin) && !isClosed && hasFinalReception;
   const canCreateReception =
     canCreateReceptionPerm &&
-    (isOwner || isAssignedAcheteur) &&
+    (isOwner || isDelegatedDemandeur || isAssignedAcheteur) &&
     achatDecisionEligible &&
     statutEligibleForReception &&
     !isClosed &&
@@ -963,6 +978,11 @@ export default function DemandeDetail() {
   );
 
   const demandeurAgent = demande?.agents_demandes_paiement_demandeur_idToagents;
+  const createdByAgent = demande?.agents_demandes_paiement_created_by_idToagents;
+  const showCreatedBy =
+    createdByAgent &&
+    demande?.created_by_id != null &&
+    Number(demande.created_by_id) !== Number(demande.demandeur_id);
   const demandeurDirection = demande?.directions?.nom || demandeurAgent?.directions?.nom || "-";
   const demandeurDepartement = demande?.departements?.nom || demandeurAgent?.departements?.nom || "-";
   const demandeurService = demande?.services?.nom || demandeurAgent?.services?.nom || "-";
@@ -1132,6 +1152,10 @@ export default function DemandeDetail() {
                 { label: "UUID", value: <span className="font-mono">{demande.uuid}</span> },
                 { label: "Motif", value: demande.motif },
                 {
+                  label: "Description",
+                  value: demande.description ? <span className="whitespace-pre-wrap">{demande.description}</span> : "-",
+                },
+                {
                   label: "Statut",
                   value: (
                     <span className={`inline-flex px-2 py-0.5 text-xs rounded ${demandeStatusBadgeClass(demande.statut)}`}>
@@ -1142,6 +1166,7 @@ export default function DemandeDetail() {
                 { label: "Créé", value: formatDateTime(demande.created_at) },
                 { label: "Mis à jour", value: formatDateTime(demande.updated_at) },
                 { label: "Demandeur", value: agentDisplayName(demandeurAgent) },
+                ...(showCreatedBy ? [{ label: "Saisi par", value: agentDisplayName(createdByAgent) }] : []),
                 { label: "Acheteur assigne", value: assignedAcheteur ? agentDisplayName(assignedAcheteur) : "-" },
                 { label: "Direction", value: demandeurDirection },
                 { label: "Département", value: demandeurDepartement },
@@ -1152,22 +1177,26 @@ export default function DemandeDetail() {
                 { label: "Devise", value: demande.devise || "FCFA" },
                 { label: "Bénéficiaire", value: demande.beneficiaire || "-" },
                 { label: "Observations", value: demande.remarque || "-" },
-                {
-                  label: "Validé par OCI",
-                  value:
-                    demande.validation_oci === true ? "Oui" : demande.validation_oci === false ? "Non" : "-",
-                },
-                { label: "Paiement immédiat", value: demande.paiement_immediat ? "Oui" : "Non" },
-                { label: "Budget prévu", value: demande.budget_prevu ? "Oui" : "Non" },
-                { label: "Budget dispo", value: demande.budget_disponible ? "Oui" : "Non" },
-                { label: "Ligne budgetaire", value: budgetLineLabel(demande.lignes_budgetaires) },
-                {
-                  label: "Depassement budgetaire",
-                  value:
-                    Number(demande.budget_depassement_montant || 0) > 0
-                      ? `${formatMoney(demande.budget_depassement_montant)} FCFA`
-                      : "-",
-                },
+                ...(canViewDafValidationFields
+                  ? [
+                      {
+                        label: "Validé par OCI",
+                        value:
+                          demande.validation_oci === true ? "Oui" : demande.validation_oci === false ? "Non" : "-",
+                      },
+                      { label: "Paiement immédiat", value: demande.paiement_immediat ? "Oui" : "Non" },
+                      { label: "Budget prévu", value: demande.budget_prevu ? "Oui" : "Non" },
+                      { label: "Budget dispo", value: demande.budget_disponible ? "Oui" : "Non" },
+                      { label: "Ligne budgetaire", value: budgetLineLabel(demande.lignes_budgetaires) },
+                      {
+                        label: "Depassement budgetaire",
+                        value:
+                          Number(demande.budget_depassement_montant || 0) > 0
+                            ? `${formatMoney(demande.budget_depassement_montant)} FCFA`
+                            : "-",
+                      },
+                    ]
+                  : []),
                 { label: dafCritere4Info.label, value: dafCritere4Info.value },
               ].map((item) => (
                 <div key={item.label}>

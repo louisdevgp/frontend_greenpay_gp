@@ -39,6 +39,11 @@ export async function completeDemandeSignature(sessionId) {
   return res.data;
 }
 
+export async function listCreateForAgentCandidates(params = {}) {
+  const res = await api.get("/demandes/create-candidates", { params });
+  return res.data;
+}
+
 // Update demande
 export async function updateDemande(uuid, payload) {
   const res = await api.put(`/demandes/${uuid}`, payload);

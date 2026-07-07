@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FiCheckCircle, FiCornerUpLeft, FiX, FiXCircle } from "react-icons/fi";
+import { FiCheckCircle, FiCornerUpLeft, FiPlus, FiX, FiXCircle } from "react-icons/fi";
 import {
   approveValidation,
   startValidationSignature,
@@ -10,13 +10,40 @@ import {
 import { Modal } from "../../components/ui/modal";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { emitToast } from "../../services/toastBus";
-import { listBudgetLines } from "../../services/budgetLines.service";
+import { createBudgetLine, listBudgetLines } from "../../services/budgetLines.service";
 import { formatMoney } from "../../utils/formatUtils";
 import { downloadFile } from "../../utils/downloadFile";
 import { FIRMA_ENABLED } from "../../utils/firma";
-import { budgetLineOptionLabel, budgetWarningForAmount, formatBudgetWarning } from "../../utils/budgetLines";
+import { BUDGET_MONTHS, budgetLineOptionLabel, budgetWarningForAmount, formatBudgetWarning } from "../../utils/budgetLines";
 
 const DAF_CRITERE4_LABEL = import.meta.env.VITE_DAF_CRITERE4_LABEL || "Moyen de paiement";
+const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_MONTH = new Date().getMonth() + 1;
+const EXERCICE_OPTIONS = Array.from({ length: 8 }, (_, index) => CURRENT_YEAR + 2 - index);
+
+function initialBudgetLineForm(overrides = {}) {
+  return {
+    code: "",
+    libelle: "",
+    description: "",
+    exercice: String(CURRENT_YEAR),
+    mois: String(CURRENT_MONTH),
+    devise: "FCFA",
+    montant_initial: "",
+    controle_mode: "SOUPLE",
+    statut: "active",
+    ...overrides,
+  };
+}
+
+function buildExerciceOptions(selectedValue) {
+  const selected = Number(selectedValue);
+  const options = [...EXERCICE_OPTIONS];
+  if (Number.isFinite(selected) && selected > 0 && !options.includes(selected)) {
+    options.push(selected);
+  }
+  return Array.from(new Set(options)).sort((a, b) => b - a);
+}
 
 function normalizeDafCritere4Input(value) {
   if (value == null) return "";
@@ -93,6 +120,9 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [budgetLines, setBudgetLines] = useState([]);
   const [budgetLinesLoading, setBudgetLinesLoading] = useState(false);
   const [ligneBudgetaireId, setLigneBudgetaireId] = useState("");
+  const [budgetLineCreateOpen, setBudgetLineCreateOpen] = useState(false);
+  const [budgetLineCreateSaving, setBudgetLineCreateSaving] = useState(false);
+  const [budgetLineForm, setBudgetLineForm] = useState(() => initialBudgetLineForm());
 
   const commentaireRequired =
     mode === "reject" ||
@@ -117,6 +147,24 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
 
   const formatAmount = (value) =>
     Number.isFinite(Number(value)) ? `${formatMoney(Number(value))} FCFA` : "-";
+
+  const refreshBudgetLines = useCallback(async (selectId = null) => {
+    setBudgetLinesLoading(true);
+    try {
+      const res = await listBudgetLines({ activeOnly: true });
+      const list = res?.success && Array.isArray(res.data) ? res.data : [];
+      setBudgetLines(list);
+      if (selectId) {
+        setLigneBudgetaireId(String(selectId));
+      }
+      return list;
+    } catch {
+      setBudgetLines([]);
+      return [];
+    } finally {
+      setBudgetLinesLoading(false);
+    }
+  }, []);
 
   const computeConditionsPctSum = (conditions, total) => {
     const list = Array.isArray(conditions) ? conditions : [];
@@ -195,6 +243,9 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetLines([]);
     setBudgetLinesLoading(false);
     setLigneBudgetaireId("");
+    setBudgetLineCreateOpen(false);
+    setBudgetLineCreateSaving(false);
+    setBudgetLineForm(initialBudgetLineForm());
     setError("");
     setSignatureUrl("");
     setSignatureRequestId("");
@@ -254,22 +305,15 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     if (!open || !isDaf || mode !== "approve") return;
     let active = true;
     const loadBudgetLines = async () => {
-      setBudgetLinesLoading(true);
-      try {
-        const res = await listBudgetLines({ activeOnly: true });
-        if (!active) return;
-        setBudgetLines(res?.success && Array.isArray(res.data) ? res.data : []);
-      } catch {
-        if (active) setBudgetLines([]);
-      } finally {
-        if (active) setBudgetLinesLoading(false);
-      }
+      const list = await refreshBudgetLines();
+      if (!active) return;
+      setBudgetLines(list);
     };
     loadBudgetLines();
     return () => {
       active = false;
     };
-  }, [open, isDaf, mode]);
+  }, [open, isDaf, mode, refreshBudgetLines]);
 
   const selectedBudgetLine = useMemo(() => {
     const selected = budgetLines.find((line) => Number(line.id) === Number(ligneBudgetaireId));
@@ -282,6 +326,58 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const budgetWarning = useMemo(() => {
     return budgetWarningForAmount(selectedBudgetLine, totalMontant);
   }, [selectedBudgetLine, totalMontant]);
+
+  const openBudgetLineCreate = () => {
+    setBudgetLineForm(
+      initialBudgetLineForm({
+        montant_initial: totalMontant > 0 ? String(totalMontant) : "",
+        libelle: demande?.motif ? String(demande.motif).slice(0, 140) : "",
+      })
+    );
+    setBudgetLineCreateOpen(true);
+  };
+
+  const saveBudgetLineFromValidation = async () => {
+    const libelle = String(budgetLineForm.libelle || "").trim();
+    const montantInitial = Number(budgetLineForm.montant_initial);
+    if (!libelle) {
+      emitToast({ variant: "error", message: "Libelle de ligne budgetaire obligatoire" });
+      return;
+    }
+    if (!Number.isFinite(montantInitial) || montantInitial < 0) {
+      emitToast({ variant: "error", message: "Montant initial invalide" });
+      return;
+    }
+
+    const payload = {
+      code: String(budgetLineForm.code || "").trim() || undefined,
+      libelle,
+      description: String(budgetLineForm.description || "").trim() || null,
+      exercice: Number(budgetLineForm.exercice || CURRENT_YEAR),
+      mois: Number(budgetLineForm.mois || CURRENT_MONTH),
+      devise: String(budgetLineForm.devise || "FCFA").trim().toUpperCase(),
+      montant_initial: montantInitial,
+      controle_mode: budgetLineForm.controle_mode || "SOUPLE",
+      statut: budgetLineForm.statut || "active",
+      scope_type: "GLOBAL",
+      scope_id: null,
+    };
+
+    setBudgetLineCreateSaving(true);
+    try {
+      const res = await createBudgetLine(payload);
+      if (!res?.success) throw new Error(res?.message || "Erreur creation ligne budgetaire");
+      const created = res.data;
+      emitToast({ variant: "success", message: "Ligne budgetaire creee" });
+      setBudgetLineCreateOpen(false);
+      setBudgetLineForm(initialBudgetLineForm());
+      await refreshBudgetLines(created?.id || null);
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur creation ligne budgetaire" });
+    } finally {
+      setBudgetLineCreateSaving(false);
+    }
+  };
 
   const addDafCondition = () => {
     setDafConditions((prev) => [
@@ -559,6 +655,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   if (!open) return null;
 
   return (
+    <>
     <Modal
       isOpen={open}
       onClose={close}
@@ -705,7 +802,19 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                   </select>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-600 dark:text-gray-300">Ligne budgetaire</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs text-gray-600 dark:text-gray-300">Ligne budgetaire</div>
+                    {!budgetLinesLoading && budgetLines.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={openBudgetLineCreate}
+                        className="inline-flex items-center gap-1 rounded-lg border border-brand-200 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:border-brand-800 dark:text-brand-300 dark:hover:bg-brand-500/10"
+                      >
+                        <FiPlus />
+                        Creer une ligne
+                      </button>
+                    ) : null}
+                  </div>
                   <select
                     value={ligneBudgetaireId}
                     onChange={(e) => setLigneBudgetaireId(e.target.value)}
@@ -721,6 +830,11 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                       </option>
                     ))}
                   </select>
+                  {!budgetLinesLoading && budgetLines.length === 0 ? (
+                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                      Aucune ligne budgetaire active disponible. Creez une ligne avant de proceder a la validation DAF.
+                    </div>
+                  ) : null}
                   {selectedBudgetLine ? (
                     <div
                       className={`mt-2 rounded-lg px-3 py-2 text-xs ${
@@ -979,6 +1093,159 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         </form>
         )}
     </Modal>
+
+    <BudgetLineQuickCreateModal
+      open={budgetLineCreateOpen}
+      form={budgetLineForm}
+      setForm={setBudgetLineForm}
+      saving={budgetLineCreateSaving}
+      totalMontant={totalMontant}
+      onClose={() => {
+        if (budgetLineCreateSaving) return;
+        setBudgetLineCreateOpen(false);
+      }}
+      onSave={saveBudgetLineFromValidation}
+    />
+    </>
+  );
+}
+
+function BudgetLineQuickCreateModal({ open, form, setForm, saving, totalMontant, onClose, onSave }) {
+  return (
+    <Modal
+      isOpen={open}
+      onClose={onClose}
+      title="Nouvelle ligne budgetaire"
+      className="max-w-[760px] m-4"
+    >
+      <div className="no-scrollbar max-h-[calc(100vh-2rem)] overflow-y-auto p-4 pr-14 lg:p-6">
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
+          Cette ligne sera creee au perimetre global entreprise et pourra etre selectionnee pour cette validation DAF.
+          {totalMontant > 0 ? ` Montant de la demande: ${formatMoney(totalMontant)} FCFA.` : ""}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Code">
+            <input
+              value={form.code}
+              onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Genere automatiquement si vide"
+            />
+          </Field>
+          <Field label="Libelle *">
+            <input
+              value={form.libelle}
+              onChange={(e) => setForm((p) => ({ ...p, libelle: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="Ex: Materiel informatique"
+            />
+          </Field>
+          <Field label="Exercice">
+            <select
+              value={form.exercice}
+              onChange={(e) => setForm((p) => ({ ...p, exercice: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              {buildExerciceOptions(form.exercice).map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Mois">
+            <select
+              value={form.mois}
+              onChange={(e) => setForm((p) => ({ ...p, mois: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              {BUDGET_MONTHS.map((month) => (
+                <option key={month.value} value={month.value}>
+                  {month.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Montant initial *">
+            <input
+              type="number"
+              step="any"
+              value={form.montant_initial}
+              onChange={(e) => setForm((p) => ({ ...p, montant_initial: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              placeholder="0"
+            />
+          </Field>
+          <Field label="Devise">
+            <input
+              value={form.devise}
+              onChange={(e) => setForm((p) => ({ ...p, devise: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            />
+          </Field>
+          <Field label="Controle">
+            <select
+              value={form.controle_mode}
+              onChange={(e) => setForm((p) => ({ ...p, controle_mode: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              <option value="SOUPLE">Souple - avertissement seulement</option>
+              <option value="STRICT">Strict - bloquant</option>
+            </select>
+          </Field>
+          <Field label="Statut">
+            <select
+              value={form.statut}
+              onChange={(e) => setForm((p) => ({ ...p, statut: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+            >
+              <option value="active">Active</option>
+              <option value="suspendue">Suspendue</option>
+              <option value="cloturee">Cloturee</option>
+            </select>
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Description">
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg outline-none dark:bg-gray-950 dark:border-gray-800"
+              />
+            </Field>
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-700"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving || !String(form.libelle || "").trim() || !String(form.montant_initial || "").trim()}
+            className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-60"
+          >
+            {saving ? "Enregistrement..." : "Creer et selectionner"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
+      <div className="mt-1">{children}</div>
+    </label>
   );
 }
 
