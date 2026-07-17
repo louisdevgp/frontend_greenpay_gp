@@ -134,6 +134,7 @@ export default function DemandeDetail() {
   const { user, hasPermission, hasAnyPermission, refreshMe } = useAuth();
   const roles = (user?.roles || []).map((r) => String(r).toUpperCase());
   const canUpdateDemande = hasPermission("DEMANDE_UPDATE");
+  const canCreateDemande = hasPermission("DEMANDE_CREATE");
   const canDeleteDemande = hasPermission("DEMANDE_DELETE");
   const canCloseDemande = hasPermission("DEMANDE_CLOSE");
   const canCreateReceptionPerm = hasPermission("RECEPTION_CREATE");
@@ -415,10 +416,24 @@ export default function DemandeDetail() {
     if (!demande || !user) return false;
     const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
     if (isAModifier && returnWorkflow?.active) return returnWorkflow.can_edit === true;
-    if (!canUpdateDemande) return false;
+    const canRequestEdit = canUpdateDemande || canCreateDemande;
+    if (!canRequestEdit) return false;
     if (isAModifier && (isOwner || isAdmin)) return true;
+    if (isOwner && !hasValidationEngaged && !isClosed && !isRejected) return true;
     return canEditAtPending;
-  }, [demande, user, isOwner, isAdmin, canUpdateDemande, canEditAtPending, returnWorkflow]);
+  }, [
+    demande,
+    user,
+    isOwner,
+    isAdmin,
+    canUpdateDemande,
+    canCreateDemande,
+    hasValidationEngaged,
+    isClosed,
+    isRejected,
+    canEditAtPending,
+    returnWorkflow,
+  ]);
   const validationActionItem = useMemo(() => {
     if (!pendingValidationStep || !demande) return null;
     return { ...pendingValidationStep, demandes_paiement: demande };
