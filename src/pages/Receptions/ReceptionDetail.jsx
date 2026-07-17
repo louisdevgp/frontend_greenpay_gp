@@ -279,14 +279,6 @@ export default function ReceptionDetail() {
           : await completeVisaDafSignature(reception.id, signatureSessionId);
       if (!res?.success) throw new Error(res?.message || "Signature non terminee");
 
-      if (signatureSessionId) {
-        const base = reception?.uuid || uuid || signatureSessionId;
-        const filename = `signature_visa_${visaKind}_${base}.pdf`;
-        void downloadFile(`/signatures/sessions/${signatureSessionId}/download`, filename).catch(() => {
-          emitToast({ variant: "warning", message: "Preuve de signature indisponible." });
-        });
-      }
-
       await fetchReception();
       emitToast({ variant: "success", message: visaKind === "daf" ? "Visa DAF effectue" : "Visa directeur effectue" });
       const shouldDownloadPdf =

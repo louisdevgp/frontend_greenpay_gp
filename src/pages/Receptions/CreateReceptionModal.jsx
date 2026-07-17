@@ -8,7 +8,6 @@ import FirmaSignatureFrame from "../../components/common/FirmaSignatureFrame";
 import { FIRMA_ENABLED } from "../../utils/firma";
 import { emitToast } from "../../services/toastBus";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
-import { downloadFile } from "../../utils/downloadFile";
 
 export default function CreateReceptionModal({ open, paiement, demande, onClose, onCreated }) {
     const [submitting, setSubmitting] = useState(false);
@@ -160,14 +159,6 @@ export default function CreateReceptionModal({ open, paiement, demande, onClose,
             if (!res?.success) throw new Error(res?.message || "Signature non terminee");
 
             const reception = res?.data;
-            if (signatureSessionId) {
-                const filename = reception?.uuid
-                    ? `signature_reception_${reception.uuid}.pdf`
-                    : `signature_reception_${signatureSessionId}.pdf`;
-                void downloadFile(`/signatures/sessions/${signatureSessionId}/download`, filename).catch(() => {
-                    emitToast({ variant: "warning", message: "Preuve de signature indisponible." });
-                });
-            }
             if (form.require_docs && docs.files?.length && reception?.id) {
                 const typeDocumentToSend =
                     String(docs.type_document).toLowerCase() === "autre"

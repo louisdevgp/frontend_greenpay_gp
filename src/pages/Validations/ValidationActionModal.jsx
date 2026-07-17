@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FiCheckCircle, FiCornerUpLeft, FiPlus, FiX, FiXCircle } from "react-icons/fi";
+import { FiCheckCircle, FiCornerUpLeft, FiEye, FiPlus, FiX, FiXCircle } from "react-icons/fi";
 import {
   approveValidation,
   startValidationSignature,
@@ -9,12 +9,18 @@ import {
 } from "../../services/validations.service";
 import { Modal } from "../../components/ui/modal";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
+import PdfPreviewModal from "../../components/common/PdfPreviewModal";
 import { emitToast } from "../../services/toastBus";
 import { createBudgetLine, listBudgetLines } from "../../services/budgetLines.service";
 import { formatMoney } from "../../utils/formatUtils";
-import { downloadFile } from "../../utils/downloadFile";
 import { FIRMA_ENABLED } from "../../utils/firma";
-import { BUDGET_MONTHS, budgetLineOptionLabel, budgetWarningForAmount, formatBudgetWarning } from "../../utils/budgetLines";
+import {
+  BUDGET_MONTHS,
+  budgetLineLabel,
+  budgetLineOptionLabel,
+  budgetWarningForAmount,
+  formatBudgetWarning,
+} from "../../utils/budgetLines";
 
 const DAF_CRITERE4_LABEL = import.meta.env.VITE_DAF_CRITERE4_LABEL || "Moyen de paiement";
 const CURRENT_YEAR = new Date().getFullYear();
@@ -75,6 +81,73 @@ function normalizeValidationStopRole(value) {
   return null;
 }
 
+function yesNoLabel(value) {
+  const response = normalizeControlResponse(value);
+  if (response) return controlResponseLabel(response);
+  if (value === true) return "Oui";
+  if (value === false) return "Non";
+  if (value === 1 || value === "1") return "Oui";
+  if (value === 0 || value === "0") return "Non";
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["true", "oui", "yes"].includes(normalized)) return "Oui";
+  if (["false", "non", "no"].includes(normalized)) return "Non";
+  return "-";
+}
+
+function normalizeControlResponse(value) {
+  if (value == null || value === "") return null;
+  if (value === true) return "OUI";
+  if (value === false) return "NON";
+  const v = String(value).trim().toUpperCase();
+  if (["OUI", "YES", "TRUE", "1"].includes(v)) return "OUI";
+  if (["NON", "NO", "FALSE", "0"].includes(v)) return "NON";
+  if (["NA", "N/A", "N.A", "N.A.", "N A", "NOT_APPLICABLE"].includes(v)) return "NA";
+  return null;
+}
+
+function controlResponseLabel(value) {
+  const response = normalizeControlResponse(value);
+  if (response === "OUI") return "Oui";
+  if (response === "NON") return "Non";
+  if (response === "NA") return "N/A";
+  return "-";
+}
+
+function controlResponseToBoolean(value) {
+  const response = normalizeControlResponse(value);
+  if (response === "OUI") return true;
+  if (response === "NON") return false;
+  return null;
+}
+
+function normalizeDafControlComments(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, raw]) => [key, raw == null ? "" : String(raw).trim()])
+      .filter(([, raw]) => raw)
+  );
+}
+
+function controlComment(comments, key) {
+  if (!comments || typeof comments !== "object") return "";
+  return comments[key] ? String(comments[key]) : "";
+}
+
+function budgetLineSummaryLabel(summary) {
+  const response = normalizeControlResponse(summary?.ligne_budgetaire_reponse ?? (summary?.lignes_budgetaires ? "OUI" : null));
+  if (response === "OUI") return budgetLineLabel(summary?.lignes_budgetaires);
+  return controlResponseLabel(response);
+}
+
+function formatBudgetOverrun(demande) {
+  if (!demande || demande.budget_depassement_montant == null) return "-";
+  const amount = Number(demande.budget_depassement_montant);
+  if (!Number.isFinite(amount)) return "-";
+  if (amount <= 0) return "Non";
+  return `${formatMoney(amount)} ${demande.devise || "FCFA"}`;
+}
+
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
   // mode: "approve" | "reject" | "return"
   const makeDafCondition = (index, overrides = {}) => ({
@@ -94,11 +167,32 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const [signatureUserId, setSignatureUserId] = useState("");
   const [signatureError, setSignatureError] = useState("");
   const [signatureCompleting, setSignatureCompleting] = useState(false);
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
 
   const role = useMemo(() => String(item?.role_name || "").toUpperCase(), [item?.role_name]);
   const demande = item?.demandes_paiement || null;
+  const dafSummary = demande?.daf_validation_summary || demande || {};
+  const dafSummaryComments = normalizeDafControlComments(dafSummary?.daf_controle_commentaires);
   const isDaf = role === "DAF";
+  const isDga = role === "DGA";
   const isSigning = Boolean(signatureUrl);
+  const hasDafControlSummary =
+    mode === "approve" &&
+    isDga &&
+    [
+      dafSummary?.validation_oci,
+      dafSummary?.validation_oci_reponse,
+      dafSummary?.paiement_immediat,
+      dafSummary?.paiement_immediat_reponse,
+      dafSummary?.budget_prevu,
+      dafSummary?.budget_prevu_reponse,
+      dafSummary?.budget_disponible,
+      dafSummary?.budget_disponible_reponse,
+      dafSummary?.lignes_budgetaires,
+      dafSummary?.ligne_budgetaire_reponse,
+      dafSummary?.budget_depassement_montant,
+      dafSummary?.daf_critere4,
+    ].some((value) => value !== null && value !== undefined && String(value).trim() !== "");
   const demandeurConditions = useMemo(() => {
     const list = Array.isArray(demande?.conditions_paiement) ? demande.conditions_paiement : [];
     return list.filter((c) => normalizeConditionSource(c?.source) === "DEMANDEUR");
@@ -108,10 +202,12 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     return list.filter((c) => normalizeConditionSource(c?.source) === "DAF");
   }, [demande?.conditions_paiement]);
 
-  const [budgetPrevu, setBudgetPrevu] = useState(null); // null | boolean
-  const [budgetDisponible, setBudgetDisponible] = useState(null); // null | boolean
-  const [paiementImmediat, setPaiementImmediat] = useState(null); // null | boolean
-  const [validationOci, setValidationOci] = useState(null); // null | boolean
+  const [budgetPrevu, setBudgetPrevu] = useState(null); // null | OUI | NON | NA
+  const [budgetDisponible, setBudgetDisponible] = useState(null); // null | OUI | NON | NA
+  const [paiementImmediat, setPaiementImmediat] = useState(null); // null | OUI | NON | NA
+  const [validationOci, setValidationOci] = useState(null); // null | OUI | NON | NA
+  const [ligneBudgetaireResponse, setLigneBudgetaireResponse] = useState("OUI"); // OUI | NON | NA
+  const [dafControlComments, setDafControlComments] = useState({});
   const [dafCritere4, setDafCritere4] = useState(""); // string (moyen de paiement)
   const [validationStopRole, setValidationStopRole] = useState("DG"); // DAF | DGA | DG
   const [dafConditionsChoice, setDafConditionsChoice] = useState("daf"); // "daf" | "demandeur"
@@ -127,16 +223,16 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   const commentaireRequired =
     mode === "reject" ||
     mode === "return" ||
-    (mode === "approve" && isDaf && (validationOci === false || paiementImmediat === false));
+    (mode === "approve" && isDaf && (validationOci === "NON" || paiementImmediat === "NON"));
   const commentairePlaceholder =
     mode === "reject"
       ? "Motif du rejet (obligatoire)"
       : mode === "return"
         ? "Motif du retour pour modification (obligatoire)"
-        : mode === "approve" && isDaf && validationOci === false
+        : mode === "approve" && isDaf && validationOci === "NON"
           ? "Commentaire obligatoire si Validé par OCI = Non"
-          : mode === "approve" && isDaf && paiementImmediat === false
-            ? "Commentaire obligatoire si paiement non immediat"
+          : mode === "approve" && isDaf && paiementImmediat === "NON"
+            ? "Commentaire obligatoire si paiement non immédiat"
             : "Optionnel";
 
   const totalMontant = useMemo(() => {
@@ -235,6 +331,8 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetDisponible(null);
     setPaiementImmediat(null);
     setValidationOci(null);
+    setLigneBudgetaireResponse("OUI");
+    setDafControlComments({});
     setDafCritere4("");
     setValidationStopRole("DG");
     setDafConditionsChoice("daf");
@@ -259,10 +357,14 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   React.useEffect(() => {
     if (!open) return;
     if (!isDaf) return;
-    setBudgetPrevu(demande?.budget_prevu === true ? true : demande?.budget_prevu === false ? false : null);
-    setBudgetDisponible(demande?.budget_disponible === true ? true : demande?.budget_disponible === false ? false : null);
-    setPaiementImmediat(demande?.paiement_immediat === true ? true : demande?.paiement_immediat === false ? false : null);
-    setValidationOci(demande?.validation_oci === true ? true : demande?.validation_oci === false ? false : null);
+    setBudgetPrevu(normalizeControlResponse(demande?.budget_prevu_reponse ?? demande?.budget_prevu));
+    setBudgetDisponible(normalizeControlResponse(demande?.budget_disponible_reponse ?? demande?.budget_disponible));
+    setPaiementImmediat(normalizeControlResponse(demande?.paiement_immediat_reponse ?? demande?.paiement_immediat));
+    setValidationOci(normalizeControlResponse(demande?.validation_oci_reponse ?? demande?.validation_oci));
+    setLigneBudgetaireResponse(
+      normalizeControlResponse(demande?.ligne_budgetaire_reponse ?? (demande?.ligne_budgetaire_id ? "OUI" : null)) || "OUI"
+    );
+    setDafControlComments(normalizeDafControlComments(demande?.daf_controle_commentaires));
     setDafCritere4(normalizeDafCritere4Input(demande?.daf_critere4));
     setValidationStopRole(normalizeValidationStopRole(demande?.validation_stop_role) || "DG");
     setLigneBudgetaireId(demande?.ligne_budgetaire_id ? String(demande.ligne_budgetaire_id) : "");
@@ -291,12 +393,18 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     open,
     isDaf,
     demande?.budget_prevu,
+    demande?.budget_prevu_reponse,
     demande?.budget_disponible,
+    demande?.budget_disponible_reponse,
     demande?.paiement_immediat,
+    demande?.paiement_immediat_reponse,
     demande?.validation_oci,
+    demande?.validation_oci_reponse,
     demande?.daf_critere4,
     demande?.validation_stop_role,
     demande?.ligne_budgetaire_id,
+    demande?.ligne_budgetaire_reponse,
+    demande?.daf_controle_commentaires,
     dafExisting,
     demandeurConditions.length,
   ]);
@@ -316,12 +424,13 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
   }, [open, isDaf, mode, refreshBudgetLines]);
 
   const selectedBudgetLine = useMemo(() => {
+    if (ligneBudgetaireResponse !== "OUI") return null;
     const selected = budgetLines.find((line) => Number(line.id) === Number(ligneBudgetaireId));
     if (selected) return selected;
     const assigned = demande?.lignes_budgetaires || null;
     if (assigned && Number(assigned.id) === Number(ligneBudgetaireId)) return assigned;
     return null;
-  }, [budgetLines, ligneBudgetaireId, demande?.lignes_budgetaires]);
+  }, [budgetLines, ligneBudgetaireId, demande?.lignes_budgetaires, ligneBudgetaireResponse]);
 
   const budgetWarning = useMemo(() => {
     return budgetWarningForAmount(selectedBudgetLine, totalMontant);
@@ -341,7 +450,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     const libelle = String(budgetLineForm.libelle || "").trim();
     const montantInitial = Number(budgetLineForm.montant_initial);
     if (!libelle) {
-      emitToast({ variant: "error", message: "Libelle de ligne budgetaire obligatoire" });
+      emitToast({ variant: "error", message: "Libellé de ligne budgétaire obligatoire" });
       return;
     }
     if (!Number.isFinite(montantInitial) || montantInitial < 0) {
@@ -366,14 +475,14 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     setBudgetLineCreateSaving(true);
     try {
       const res = await createBudgetLine(payload);
-      if (!res?.success) throw new Error(res?.message || "Erreur creation ligne budgetaire");
+      if (!res?.success) throw new Error(res?.message || "Erreur création ligne budgétaire");
       const created = res.data;
-      emitToast({ variant: "success", message: "Ligne budgetaire creee" });
+      emitToast({ variant: "success", message: "Ligne budgétaire créée" });
       setBudgetLineCreateOpen(false);
       setBudgetLineForm(initialBudgetLineForm());
       await refreshBudgetLines(created?.id || null);
     } catch (e) {
-      emitToast({ variant: "error", message: e?.message || "Erreur creation ligne budgetaire" });
+      emitToast({ variant: "error", message: e?.message || "Erreur création ligne budgétaire" });
     } finally {
       setBudgetLineCreateSaving(false);
     }
@@ -437,6 +546,22 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     );
   };
 
+  const setDafControlComment = (key, value) => {
+    setDafControlComments((current) => ({ ...current, [key]: value }));
+  };
+
+  const dafNaCommentFields = useMemo(
+    () =>
+      [
+        { key: "budget_prevu", label: "Prévu au budget", value: budgetPrevu },
+        { key: "budget_disponible", label: "Budget disponible", value: budgetDisponible },
+        { key: "validation_oci", label: "Validé par OCI", value: validationOci },
+        { key: "paiement_immediat", label: "Paiement immédiat", value: paiementImmediat },
+        { key: "ligne_budgetaire", label: "Ligne budgétaire", value: ligneBudgetaireResponse },
+      ].filter((field) => field.value === "NA"),
+    [budgetDisponible, budgetPrevu, ligneBudgetaireResponse, paiementImmediat, validationOci]
+  );
+
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -453,29 +578,49 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       }
 
       let dafExtraPayload = {};
+      let cleanedDafControlComments = {};
       if (mode === "approve" && isDaf) {
         if (
-          budgetPrevu === null ||
-          budgetDisponible === null ||
-          paiementImmediat === null ||
-          validationOci === null ||
+          !budgetPrevu ||
+          !budgetDisponible ||
+          !paiementImmediat ||
+          !validationOci ||
+          !ligneBudgetaireResponse ||
           !dafCritere4 ||
-          !ligneBudgetaireId
+          (ligneBudgetaireResponse === "OUI" && !ligneBudgetaireId)
         ) {
           throw new Error(
-            "Controle DAF: renseigne Budget prevu, Budget disponible, Paiement immediat, Validé par OCI, Moyen de paiement et Ligne budgetaire"
+            "Contrôle DAF : renseignez Budget prévu, Budget disponible, Paiement immédiat, Validation OCI, Moyen de paiement et Ligne budgétaire"
           );
         }
 
-        const stopRoleNormalized = normalizeValidationStopRole(validationStopRole);
-        if (!stopRoleNormalized) throw new Error("Categorie de validation invalide");
+        const dafControlResponses = {
+          budget_prevu: budgetPrevu,
+          budget_disponible: budgetDisponible,
+          paiement_immediat: paiementImmediat,
+          validation_oci: validationOci,
+          ligne_budgetaire: ligneBudgetaireResponse,
+        };
+        for (const [key, value] of Object.entries(dafControlResponses)) {
+          if (value === "NA" && !String(dafControlComments[key] || "").trim()) {
+            throw new Error("Commentaire obligatoire pour chaque champ DAF en N/A");
+          }
+        }
+        cleanedDafControlComments = Object.fromEntries(
+          Object.entries(normalizeDafControlComments(dafControlComments)).filter(
+            ([key]) => dafControlResponses[key] === "NA"
+          )
+        );
 
-        if (validationOci === false && !commentaireTrimmed) {
+        const stopRoleNormalized = normalizeValidationStopRole(validationStopRole);
+        if (!stopRoleNormalized) throw new Error("Catégorie de validation invalide");
+
+        if (validationOci === "NON" && !commentaireTrimmed) {
           throw new Error("Commentaire obligatoire si Validation OCI = Non");
         }
 
-        if (paiementImmediat === false) {
-          if (!commentaireTrimmed) throw new Error("Commentaire obligatoire si paiement non immediat");
+        if (paiementImmediat === "NON") {
+          if (!commentaireTrimmed) throw new Error("Commentaire obligatoire si paiement non immédiat");
 
           if (dafConditionsChoice === "demandeur") {
             if (!demandeurConditions.length) {
@@ -536,7 +681,8 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         dafExtraPayload = {
           ...dafExtraPayload,
           validation_stop_role: stopRoleNormalized,
-          ligne_budgetaire_id: Number(ligneBudgetaireId),
+          ligne_budgetaire_reponse: ligneBudgetaireResponse,
+          ...(ligneBudgetaireResponse === "OUI" ? { ligne_budgetaire_id: Number(ligneBudgetaireId) } : {}),
         };
       }
 
@@ -545,10 +691,15 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
           ...(commentaireTrimmed ? { commentaire: commentaireTrimmed } : {}),
           ...(isDaf
             ? {
-                budget_prevu: !!budgetPrevu,
-                budget_disponible: !!budgetDisponible,
-                paiement_immediat: !!paiementImmediat,
-                validation_oci: !!validationOci,
+                budget_prevu: controlResponseToBoolean(budgetPrevu),
+                budget_disponible: controlResponseToBoolean(budgetDisponible),
+                paiement_immediat: controlResponseToBoolean(paiementImmediat),
+                validation_oci: controlResponseToBoolean(validationOci),
+                budget_prevu_reponse: budgetPrevu,
+                budget_disponible_reponse: budgetDisponible,
+                paiement_immediat_reponse: paiementImmediat,
+                validation_oci_reponse: validationOci,
+                daf_controle_commentaires: cleanedDafControlComments,
                 daf_critere4: dafCritere4 ? String(dafCritere4).trim() : null,
                 ...dafExtraPayload, // Envoyer le moyen de paiement comme chaîne
               }
@@ -558,7 +709,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         if (!FIRMA_ENABLED) {
           const res = await approveValidation(id, approvePayload);
           if (!res?.success) throw new Error(res?.message || "Validation impossible");
-          emitToast({ variant: "success", message: "Validation effectuee" });
+          emitToast({ variant: "success", message: "Validation effectuée" });
           onDone?.();
           close();
           return;
@@ -607,17 +758,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       const res = await completeValidationSignature(item.id);
       if (!res?.success) throw new Error(res?.message || "Signature non terminee");
 
-      void downloadFile(
-        `/validations/${item.id}/signature/download`,
-        `signature_validation_${item.id}.pdf`
-      ).catch(() => {
-        emitToast({
-          variant: "warning",
-          message: "Preuve de signature indisponible.",
-        });
-      });
-
-      emitToast({ variant: "success", message: "Validation effectuee" });
+      emitToast({ variant: "success", message: "Validation effectuée" });
       onDone?.();
       close({ force: true });
     } catch (err) {
@@ -660,7 +801,9 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       isOpen={open}
       onClose={close}
       showCloseButton={false}
-      className={`w-full ${isSigning ? "max-w-4xl" : "max-w-xl"} rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800`}
+      className={`w-full ${
+        isSigning ? "max-w-4xl" : mode === "approve" && isDaf ? "max-w-2xl" : "max-w-xl"
+      } max-h-[calc(100vh-2rem)] overflow-hidden rounded-2xl border border-gray-200 p-5 shadow-xl dark:border-gray-800`}
     >
         <FullscreenLoader
           show={submitting || signatureCompleting}
@@ -749,11 +892,38 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
             </div>
           </div>
         ) : (
-        <form onSubmit={onSubmit} className="mt-4 space-y-4">
+        <form onSubmit={onSubmit} className="mt-4 max-h-[calc(100vh-11rem)] space-y-4 overflow-y-auto pr-1 pb-1">
+          {hasDafControlSummary ? (
+            <div className="p-4 border border-blue-200 bg-blue-50 rounded-xl text-sm dark:border-blue-500/30 dark:bg-blue-500/10">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="font-medium text-blue-950 dark:text-blue-100">Synthèse du contrôle DAF</div>
+                {demande?.uuid ? (
+                  <button
+                    type="button"
+                    onClick={() => setPdfPreviewOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-medium text-blue-900 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100 dark:hover:bg-blue-500/20"
+                  >
+                    <FiEye />
+                    Prévisualiser la fiche PDF
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <DafSummaryItem label="Validé par OCI" value={yesNoLabel(dafSummary?.validation_oci_reponse ?? dafSummary?.validation_oci)} comment={controlComment(dafSummaryComments, "validation_oci")} />
+                <DafSummaryItem label="Paiement immédiat" value={yesNoLabel(dafSummary?.paiement_immediat_reponse ?? dafSummary?.paiement_immediat)} comment={controlComment(dafSummaryComments, "paiement_immediat")} />
+                <DafSummaryItem label="Budget prévu" value={yesNoLabel(dafSummary?.budget_prevu_reponse ?? dafSummary?.budget_prevu)} comment={controlComment(dafSummaryComments, "budget_prevu")} />
+                <DafSummaryItem label="Budget dispo" value={yesNoLabel(dafSummary?.budget_disponible_reponse ?? dafSummary?.budget_disponible)} comment={controlComment(dafSummaryComments, "budget_disponible")} />
+                <DafSummaryItem label="Ligne budgétaire" value={budgetLineSummaryLabel(dafSummary)} comment={controlComment(dafSummaryComments, "ligne_budgetaire")} />
+                <DafSummaryItem label="Dépassement budgétaire" value={formatBudgetOverrun(dafSummary)} />
+                <DafSummaryItem label={DAF_CRITERE4_LABEL} value={normalizeDafCritere4Input(dafSummary?.daf_critere4) || "-"} />
+              </div>
+            </div>
+          ) : null}
+
           {mode === "approve" && isDaf ? (
             <div className="p-4 border border-gray-200 rounded-xl dark:border-gray-800">
               <div className="text-sm font-medium text-gray-800 dark:text-white/90">Contrôle DAF</div>
-              <div className="mt-2 grid grid-cols-1 gap-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <YesNo
                   label="Prévu au budget ?"
                   value={budgetPrevu}
@@ -790,7 +960,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                   </select>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-600 dark:text-gray-300">Categorie de validation</div>
+                  <div className="text-xs text-gray-600 dark:text-gray-300">Catégorie de validation</div>
                   <select
                     value={validationStopRole}
                     onChange={(e) => setValidationStopRole(e.target.value)}
@@ -801,17 +971,26 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                     <option value="DAF">Jusqu'au DAF</option>
                   </select>
                 </div>
+                <YesNo
+                  label="Ligne budgétaire ?"
+                  value={ligneBudgetaireResponse}
+                  onChange={(next) => {
+                    setLigneBudgetaireResponse(next);
+                    if (next !== "OUI") setLigneBudgetaireId("");
+                  }}
+                />
+                {ligneBudgetaireResponse === "OUI" ? (
                 <div>
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs text-gray-600 dark:text-gray-300">Ligne budgetaire</div>
-                    {!budgetLinesLoading && budgetLines.length === 0 ? (
+                    <div className="text-xs text-gray-600 dark:text-gray-300">Ligne budgétaire</div>
+                    {!budgetLinesLoading ? (
                       <button
                         type="button"
                         onClick={openBudgetLineCreate}
                         className="inline-flex items-center gap-1 rounded-lg border border-brand-200 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:border-brand-800 dark:text-brand-300 dark:hover:bg-brand-500/10"
                       >
                         <FiPlus />
-                        Creer une ligne
+                        Créer une ligne
                       </button>
                     ) : null}
                   </div>
@@ -822,7 +1001,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                     disabled={budgetLinesLoading}
                   >
                     <option value="">
-                      {budgetLinesLoading ? "Chargement..." : "Selectionnez une ligne budgetaire"}
+                      {budgetLinesLoading ? "Chargement..." : "Sélectionnez une ligne budgétaire"}
                     </option>
                     {budgetLines.map((line) => (
                       <option key={line.id} value={line.id}>
@@ -831,8 +1010,8 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                     ))}
                   </select>
                   {!budgetLinesLoading && budgetLines.length === 0 ? (
-                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-                      Aucune ligne budgetaire active disponible. Creez une ligne avant de proceder a la validation DAF.
+                    <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-amber-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-amber-300">
+                      Aucune ligne budgétaire active disponible. Créez une ligne avant de procéder à la validation DAF.
                     </div>
                   ) : null}
                   {selectedBudgetLine ? (
@@ -844,13 +1023,38 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                       }`}
                     >
                       {formatBudgetWarning(selectedBudgetLine, totalMontant)}
-                      {budgetWarning?.exceeded ? " Le depassement est autorise en mode souple." : null}
+                      {budgetWarning?.exceeded ? " Le dépassement est autorisé en mode souple." : null}
                     </div>
                   ) : null}
                 </div>
+                ) : null}
               </div>
 
-              {paiementImmediat === false ? (
+              {dafNaCommentFields.length ? (
+                <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 dark:border-blue-500/30 dark:bg-blue-500/10">
+                  <div className="text-xs font-medium text-blue-900 dark:text-blue-100">
+                    Commentaires obligatoires pour les champs en N/A
+                  </div>
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {dafNaCommentFields.map((field) => (
+                      <label key={field.key} className="block">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-blue-700 dark:text-blue-200">
+                          {field.label}
+                        </span>
+                        <textarea
+                          value={controlComment(dafControlComments, field.key)}
+                          onChange={(e) => setDafControlComment(field.key, e.target.value)}
+                          rows={1}
+                          placeholder="Commentaire obligatoire"
+                          className="mt-1 min-h-10 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 dark:border-blue-500/30 dark:bg-gray-950"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {paiementImmediat === "NON" ? (
                 <div className="mt-3 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
                   <div className="text-xs text-gray-600 dark:text-gray-300">Conditions de paiement</div>
                   <div className="mt-2 space-y-2">
@@ -874,7 +1078,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                         checked={dafConditionsChoice === "daf"}
                         onChange={() => setDafConditionsChoice("daf")}
                       />
-                      Modifier ou creer des conditions DAF
+                      Modifier ou créer des conditions DAF
                     </label>
                   </div>
 
@@ -923,7 +1127,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                         <option value="100/100">100/100</option>
                         <option value="70/30">70/30</option>
                         <option value="50/50">50/50</option>
-                        <option value="custom">Personnalise</option>
+                        <option value="custom">Personnalisé</option>
                       </select>
 
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -1003,7 +1207,7 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                                 placeholder="Condition (optionnel)"
                               />
                               <div className="sm:col-span-6 text-xs text-gray-500 dark:text-gray-400">
-                                {c.mode === "amount" ? "Pourcentage" : "Montant prevu"}:{" "}
+                                {c.mode === "amount" ? "Pourcentage" : "Montant prévu"}:{" "}
                                 {c.mode === "amount"
                                   ? `${Number.isFinite(toNumber(c.montant_prevu)) && totalMontant > 0
                                       ? ((Number(c.montant_prevu) / totalMontant) * 100).toFixed(2)
@@ -1094,6 +1298,13 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
         )}
     </Modal>
 
+    <PdfPreviewModal
+      open={pdfPreviewOpen}
+      url={demande?.uuid ? `/demandes/${demande.uuid}/pdf` : ""}
+      title={demande?.uuid ? `Fiche demande ${demande.uuid}` : "Fiche demande"}
+      onClose={() => setPdfPreviewOpen(false)}
+    />
+
     <BudgetLineQuickCreateModal
       open={budgetLineCreateOpen}
       form={budgetLineForm}
@@ -1115,7 +1326,7 @@ function BudgetLineQuickCreateModal({ open, form, setForm, saving, totalMontant,
     <Modal
       isOpen={open}
       onClose={onClose}
-      title="Nouvelle ligne budgetaire"
+      title="Nouvelle ligne budgétaire"
       className="max-w-[760px] m-4"
     >
       <div className="no-scrollbar max-h-[calc(100vh-2rem)] overflow-y-auto p-4 pr-14 lg:p-6">
@@ -1232,7 +1443,7 @@ function BudgetLineQuickCreateModal({ open, form, setForm, saving, totalMontant,
             disabled={saving || !String(form.libelle || "").trim() || !String(form.montant_initial || "").trim()}
             className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-60"
           >
-            {saving ? "Enregistrement..." : "Creer et selectionner"}
+            {saving ? "Enregistrement..." : "Créer et sélectionner"}
           </button>
         </div>
       </div>
@@ -1253,13 +1464,13 @@ function YesNo({ label, value, onChange }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs text-gray-600 dark:text-gray-300">{label}</div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <label className="inline-flex items-center gap-2 text-sm">
           <input
             type="radio"
             name={label}
-            checked={value === true}
-            onChange={() => onChange(true)}
+            checked={value === "OUI"}
+            onChange={() => onChange("OUI")}
           />
           Oui
         </label>
@@ -1267,14 +1478,31 @@ function YesNo({ label, value, onChange }) {
           <input
             type="radio"
             name={label}
-            checked={value === false}
-            onChange={() => onChange(false)}
+            checked={value === "NON"}
+            onChange={() => onChange("NON")}
           />
           Non
+        </label>
+        <label className="inline-flex items-center gap-2 text-sm">
+          <input
+            type="radio"
+            name={label}
+            checked={value === "NA"}
+            onChange={() => onChange("NA")}
+          />
+          N/A
         </label>
       </div>
     </div>
   );
 }
 
-
+function DafSummaryItem({ label, value, comment = "" }) {
+  return (
+    <div className="rounded-lg bg-white/70 px-3 py-2 dark:bg-gray-950/40">
+      <div className="text-[11px] uppercase tracking-wide text-blue-700 dark:text-blue-200">{label}</div>
+      <div className="mt-1 font-medium text-gray-900 dark:text-white/90">{value || "-"}</div>
+      {comment ? <div className="mt-2 text-xs leading-snug text-gray-600 dark:text-gray-300">{comment}</div> : null}
+    </div>
+  );
+}

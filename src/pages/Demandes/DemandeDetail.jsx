@@ -12,12 +12,13 @@ import {
 } from "../../services/demandes.services";
 import { listDocuments, uploadManyDocuments } from "../../services/documents.service";
 import { useAuth } from "../../context/AuthContext";
-import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiFilePlus, FiLock, FiPlus, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
+import { FiArrowLeft, FiCheckCircle, FiCornerUpLeft, FiDownload, FiEdit2, FiEye, FiFilePlus, FiLock, FiPlus, FiRefreshCw, FiUpload, FiXCircle } from "react-icons/fi";
 import DemandeEditModal from "./DemandeEditModal";
 import CreateReceptionModal from "../Receptions/CreateReceptionModal";
 import ValidationActionModal from "../Validations/ValidationActionModal";
 import ConfirmActionModal from "../../components/common/ConfirmActionModal";
 import LoadingButton from "../../components/common/LoadingButton";
+import PdfPreviewModal from "../../components/common/PdfPreviewModal";
 import { emitToast } from "../../services/toastBus";
 import { downloadFile } from "../../utils/downloadFile";
 import { labelDemandeStatut, labelValidationStepStatus, demandeStatusBadgeClass } from "../../utils/statusLabels";
@@ -156,6 +157,7 @@ export default function DemandeDetail() {
   const [closeLoading, setCloseLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState({ open: false, kind: null });
   const [validationAction, setValidationAction] = useState({ open: false, mode: "approve" });
+  const dgaRecapAutoOpenedRef = useRef("");
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -176,6 +178,7 @@ export default function DemandeDetail() {
   const [acheteurDraft, setAcheteurDraft] = useState("");
   const [acheteurError, setAcheteurError] = useState("");
   const [downloadState, setDownloadState] = useState({});
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const achatFilesInputRef = useRef(null);
 
   const isDownloading = (key) => !!downloadState[key];
@@ -420,6 +423,25 @@ export default function DemandeDetail() {
     if (!pendingValidationStep || !demande) return null;
     return { ...pendingValidationStep, demandes_paiement: demande };
   }, [pendingValidationStep, demande]);
+
+  useEffect(() => {
+    if (!validationActionItem || !demande?.uuid || !pendingValidationStep?.id) return;
+    if (pendingRole !== "DGA") return;
+    if (!canApprovePending) return;
+    if (validationAction.open) return;
+
+    const key = `${demande.uuid}:${pendingValidationStep.id}`;
+    if (dgaRecapAutoOpenedRef.current === key) return;
+    dgaRecapAutoOpenedRef.current = key;
+    setValidationAction({ open: true, mode: "approve" });
+  }, [
+    validationActionItem,
+    demande?.uuid,
+    pendingValidationStep?.id,
+    pendingRole,
+    canApprovePending,
+    validationAction.open,
+  ]);
 
   const openValidationAction = (mode) => {
     setValidationAction({ open: true, mode });
@@ -999,6 +1021,12 @@ export default function DemandeDetail() {
           await fetchDemande();
         }}
       />
+      <PdfPreviewModal
+        open={pdfPreviewOpen}
+        url={demande?.uuid ? `/demandes/${demande.uuid}/pdf` : ""}
+        title={demande?.uuid ? `Fiche demande ${demande.uuid}` : "Fiche demande"}
+        onClose={() => setPdfPreviewOpen(false)}
+      />
       {loading ? (
         <div className="p-4 text-center">Chargement...</div>
       ) : error ? (
@@ -1115,6 +1143,17 @@ export default function DemandeDetail() {
                   className="inline-flex items-center justify-center p-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-900/20"
                 >
                   <FiXCircle />
+                </button>
+              ) : null}
+              {canDownloadPdf ? (
+                <button
+                  type="button"
+                  onClick={() => setPdfPreviewOpen(true)}
+                  title="Previsualiser PDF"
+                  aria-label="Previsualiser PDF"
+                  className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-200 dark:hover:bg-gray-800"
+                >
+                  <FiEye />
                 </button>
               ) : null}
               {canDownloadPdf ? (

@@ -70,7 +70,7 @@ export default function ScanPage() {
   const valid = result?.valid;
 
   const detailHref =
-    type === "demande"
+    type === "demande" || type === "demandeur"
       ? `/demandes/${uuid}`
       : type === "reception"
         ? `/receptions/${uuid}`
@@ -133,7 +133,7 @@ export default function ScanPage() {
                   </div>
                   <div className="p-4 border border-gray-200 rounded-lg dark:border-gray-800">
                     <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {type === "validation" ? "Signé le" : "Finalisé le"}
+                      {type === "validation" ? "Signé le" : type === "demandeur" ? "Créé le" : "Finalisé le"}
                     </div>
                     <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
                       {formatIso(result?.validatedAt || result?.finalizedAt)}
@@ -144,6 +144,10 @@ export default function ScanPage() {
                     <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
                       {type === "validation"
                         ? `${result?.role || "-"} — ${result?.status || "-"}`
+                        : type === "demandeur"
+                          ? `${result?.role || result?.document?.demandeur?.role || "DEMANDEUR"} — ${
+                              result?.status || result?.document?.statut || "-"
+                            }`
                         : result?.document?.statut || (result?.isFinal ? "final" : "non-final")}
                     </div>
                   </div>

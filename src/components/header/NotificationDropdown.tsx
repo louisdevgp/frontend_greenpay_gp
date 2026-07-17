@@ -5,14 +5,18 @@ import { Link } from "react-router";
 import { useRealtime, type NotificationItem } from "../../context/RealtimeContext.tsx";
 
 function resolveNotificationLink(n: NotificationItem) {
+  const type = String(n?.type || "").toLowerCase();
+
   if (n?.meta && typeof n.meta === "object") {
+    if (type === "validation_pending" && n.meta.demandeUuid) {
+      return `/demandes/${n.meta.demandeUuid}`;
+    }
     if (n.meta.paiementUuid) return `/paiements/${n.meta.paiementUuid}`;
     if (n.meta.receptionUuid) return `/receptions/${n.meta.receptionUuid}`;
     if (n.meta.validationUuid) return `/validations/uuid/${n.meta.validationUuid}`;
     if (n.meta.demandeUuid) return `/demandes/${n.meta.demandeUuid}`;
   }
 
-  const type = String(n?.type || "").toLowerCase();
   if (type === "validation_pending") return "/validations/pending";
   if (type.startsWith("delegation_")) return "/delegations";
   return "/";

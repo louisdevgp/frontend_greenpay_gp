@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { EyeCloseIcon, EyeIcon } from "../../icons";
 import Label from "../form/Label";
@@ -7,6 +7,11 @@ import Input from "../form/input/InputField";
 import Button from "../ui/button/Button";
 
 import { useAuth } from "../../context/AuthContext.jsx";
+import {
+  buildChangePasswordRedirectUrl,
+  consumePostLoginRedirect,
+  getRedirectFromSearch,
+} from "../../utils/postLoginRedirect";
 
 function getErrorMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
@@ -19,6 +24,7 @@ function getErrorMessage(err: unknown, fallback: string) {
 
 export default function SignInForm() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth() as {
     login: (args: { email: string; password: string; persist: boolean }) => Promise<{ mustChangePassword?: boolean }>;
   };
@@ -47,11 +53,13 @@ export default function SignInForm() {
         password,
         persist: false,
       });
+      const storedRedirect = consumePostLoginRedirect("/");
+      const redirectTo = getRedirectFromSearch(location.search) || storedRedirect;
 
       if (next?.mustChangePassword) {
-        navigate("/change-password", { replace: true });
+        navigate(buildChangePasswordRedirectUrl(redirectTo), { replace: true });
       } else {
-        navigate("/", { replace: true });
+        navigate(redirectTo, { replace: true });
       }
     } catch (err: unknown) {
       setErrorMsg(

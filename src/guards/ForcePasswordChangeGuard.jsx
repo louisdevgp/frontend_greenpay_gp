@@ -1,6 +1,11 @@
 import React from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import {
+  buildChangePasswordRedirectUrl,
+  buildRedirectFromLocation,
+  setPostLoginRedirect,
+} from "../utils/postLoginRedirect";
 
 export default function ForcePasswordChangeGuard() {
   const { loading, auth } = useAuth();
@@ -12,7 +17,9 @@ export default function ForcePasswordChangeGuard() {
   const isOnChangePage = location.pathname === "/change-password";
 
   if (mustChange && !isOnChangePage) {
-    return <Navigate to="/change-password" replace />;
+    const redirectPath = buildRedirectFromLocation(location);
+    setPostLoginRedirect(redirectPath);
+    return <Navigate to={buildChangePasswordRedirectUrl(redirectPath)} replace />;
   }
 
   return <Outlet />;

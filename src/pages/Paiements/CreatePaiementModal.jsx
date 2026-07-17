@@ -14,7 +14,6 @@ import Loader from "../../components/common/Loader";
 import FirmaSignatureFrame from "../../components/common/FirmaSignatureFrame";
 import { buildFileTooLargeMessage, splitFilesBySize } from "../../utils/uploadLimits";
 import { FIRMA_ENABLED } from "../../utils/firma";
-import { downloadFile } from "../../utils/downloadFile";
 
 function round2(v) {
   return Math.round(Number(v) * 100) / 100;
@@ -287,14 +286,6 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
       if (!res?.success) throw new Error(res?.message || "Signature non terminee");
 
       const paiement = res?.data;
-      if (signatureSessionId) {
-        const filename = paiement?.uuid
-          ? `signature_paiement_${paiement.uuid}.pdf`
-          : `signature_paiement_${signatureSessionId}.pdf`;
-        void downloadFile(`/signatures/sessions/${signatureSessionId}/download`, filename).catch(() => {
-          emitToast({ variant: "warning", message: "Preuve de signature indisponible." });
-        });
-      }
       const hasUploads = uploadFiles.length > 0;
       const typeDoc =
         uploadType === "autre"
@@ -578,7 +569,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
 
         {demandeResolved ? (
           <div className="p-3 border border-gray-200 rounded-xl dark:border-gray-800">
-            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Ligne budgetaire</div>
+            <div className="text-sm font-medium text-gray-800 dark:text-white/90">Ligne budgétaire</div>
             <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
               Ligne actuelle: {budgetLineLabel(demandeResolved?.lignes_budgetaires)}
             </div>
@@ -611,7 +602,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
                 }`}
               >
                 {formatBudgetWarning(selectedBudgetLine, Number(form.montant || 0))}
-                {budgetWarning?.exceeded ? " Le depassement est autorise en mode souple." : null}
+                {budgetWarning?.exceeded ? " Le dépassement est autorisé en mode souple." : null}
               </div>
             ) : null}
           </div>
@@ -661,7 +652,7 @@ export default function CreatePaiementModal({ open, onClose, onCreated, defaultD
             </select>
             {isSourceLocked ? (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Source verrouillÃ©e par un paiement prÃ©cÃ©dent ({lockedSource || "inconnue"}).
+                Source verrouillée par un paiement précédent ({lockedSource || "inconnue"}).
               </p>
             ) : null}
           </div>
