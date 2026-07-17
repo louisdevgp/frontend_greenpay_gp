@@ -94,7 +94,7 @@ export default function DemandesAllList() {
     [canGlobal, canScoped, canSelf]
   );
   const defaultRoleView = useMemo(() => getDefaultRoleView(allowedRoleViews), [allowedRoleViews]);
-  const showRoleView = allowedRoleViews.length > 1;
+  const showRoleView = allowedRoleViews.length > 1 || canScoped;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
