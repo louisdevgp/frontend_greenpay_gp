@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PageMeta from "../../components/common/PageMeta";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import { Modal } from "../../components/ui/modal";
@@ -327,6 +327,16 @@ export default function PeopleAdmin() {
     if (!agents?.length) return [];
     return agents.filter((a) => String(a.id) !== String(selectedAgent?.id));
   }, [agents, selectedAgent]);
+
+  const defaultPermissionScopes = useCallback(() => {
+    const directionId = normalizeScopeId(selectedAgent?.direction_id || agentForm.direction_id);
+    if (directionId != null) return [{ type: "DIRECTION", id: directionId }];
+    const departementId = normalizeScopeId(selectedAgent?.departement_id || agentForm.departement_id);
+    if (departementId != null) return [{ type: "DEPARTEMENT", id: departementId }];
+    const serviceId = normalizeScopeId(selectedAgent?.service_id || agentForm.service_id);
+    if (serviceId != null) return [{ type: "SERVICE", id: serviceId }];
+    return [{ type: "GLOBAL", id: null }];
+  }, [agentForm.departement_id, agentForm.direction_id, agentForm.service_id, selectedAgent]);
 
   const fetchMeta = async () => {
     setMetaLoading(true);
@@ -1040,7 +1050,7 @@ export default function PeopleAdmin() {
                                         if (next === "allow") {
                                           allow.add(code);
                                           deny.delete(code);
-                                          if (!scopes[code]) scopes[code] = [];
+                                          if (!scopes[code] || !scopes[code].length) scopes[code] = defaultPermissionScopes();
                                         } else if (next === "deny") {
                                           deny.add(code);
                                           allow.delete(code);
