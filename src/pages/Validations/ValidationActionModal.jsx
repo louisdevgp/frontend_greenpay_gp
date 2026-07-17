@@ -13,6 +13,7 @@ import PdfPreviewModal from "../../components/common/PdfPreviewModal";
 import { emitToast } from "../../services/toastBus";
 import { createBudgetLine, listBudgetLines } from "../../services/budgetLines.service";
 import { formatMoney, formatDateTime } from "../../utils/formatUtils";
+import { agentDisplayName } from "../../utils/validationActors";
 import { FIRMA_ENABLED } from "../../utils/firma";
 import {
   BUDGET_MONTHS,
@@ -133,19 +134,24 @@ function controlComment(comments, key) {
   return comments[key] ? String(comments[key]) : "";
 }
 
-function formatBudgetOverrun(demande) {
-  if (!demande || demande.budget_depassement_montant == null) return "-";
-  const amount = Number(demande.budget_depassement_montant);
-  if (!Number.isFinite(amount)) return "-";
-  if (amount <= 0) return "Non";
-  return `${formatMoney(amount)} ${demande.devise || "FCFA"}`;
+function findDafValidationStep(demande) {
+  const steps = Array.isArray(demande?.validation_steps) ? demande.validation_steps : [];
+  return steps.find((step) => {
+    const role = String(step?.role_name || "").trim().toUpperCase();
+    return role === "DAF" && (step?.validated_by_id != null || step?.validated_at);
+  });
 }
 
-function formatDafValidation(summary) {
-  const name = summary?.daf_validated_by_name ? String(summary.daf_validated_by_name).trim() : "";
-  const date = summary?.daf_validated_at ? formatDateTime(summary.daf_validated_at) : "";
-  if (name && date) return `${name} - ${date}`;
-  return name || date || "-";
+function formatDafValidation(summary, demande) {
+  const dafStep = findDafValidationStep(demande);
+  const summaryName = summary?.daf_validated_by_name ? String(summary.daf_validated_by_name).trim() : "";
+  const stepName = agentDisplayName(dafStep?.agents_validation_steps_validated_by_idToagents);
+  const name = summaryName || (stepName !== "-" ? stepName : "");
+  const rawDate = summary?.daf_validated_at || dafStep?.validated_at || "";
+  const date = rawDate ? formatDateTime(rawDate) : "";
+  if (name && date && date !== "-") return `${name} - ${date}`;
+  if (name) return name;
+  return date && date !== "-" ? date : "-";
 }
 
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
@@ -191,7 +197,6 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       dafSummary?.budget_prevu_reponse,
       dafSummary?.budget_disponible,
       dafSummary?.budget_disponible_reponse,
-      dafSummary?.budget_depassement_montant,
       dafSummary?.daf_critere4,
     ].some((value) => value !== null && value !== undefined && String(value).trim() !== "");
   const demandeurConditions = useMemo(() => {
@@ -911,12 +916,11 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
               </div>
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <DafSummaryItem label="Motif" value={dafSummary?.motif || demande?.motif || "-"} />
-                <DafSummaryItem label="Validation DAF" value={formatDafValidation(dafSummary)} />
+                <DafSummaryItem label="Validation DAF" value={formatDafValidation(dafSummary, demande)} />
                 <DafSummaryItem label="Validé par OCI" value={yesNoLabel(dafSummary?.validation_oci_reponse ?? dafSummary?.validation_oci)} comment={controlComment(dafSummaryComments, "validation_oci")} />
                 <DafSummaryItem label="Paiement immédiat" value={yesNoLabel(dafSummary?.paiement_immediat_reponse ?? dafSummary?.paiement_immediat)} comment={controlComment(dafSummaryComments, "paiement_immediat")} />
                 <DafSummaryItem label="Budget prévu" value={yesNoLabel(dafSummary?.budget_prevu_reponse ?? dafSummary?.budget_prevu)} comment={controlComment(dafSummaryComments, "budget_prevu")} />
                 <DafSummaryItem label="Budget dispo" value={yesNoLabel(dafSummary?.budget_disponible_reponse ?? dafSummary?.budget_disponible)} comment={controlComment(dafSummaryComments, "budget_disponible")} />
-                <DafSummaryItem label="Dépassement budgétaire" value={formatBudgetOverrun(dafSummary)} />
                 <DafSummaryItem label={DAF_CRITERE4_LABEL} value={normalizeDafCritere4Input(dafSummary?.daf_critere4) || "-"} />
               </div>
             </div>
