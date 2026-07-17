@@ -150,6 +150,10 @@ function PermissionScopeEditor({
     applyScope(draftType, draftId);
   };
 
+  const clearGlobalScope = () => {
+    onChange(normalized.filter((s) => normalizeScopeType(s.type) !== "GLOBAL"));
+  };
+
   const removeScope = (idx) => {
     const next = normalized.filter((_, i) => i !== idx);
     onChange(next);
@@ -191,7 +195,7 @@ function PermissionScopeEditor({
           ))}
         </div>
       ) : (
-        <div className="text-[11px] text-gray-400 dark:text-gray-500">Par defaut: Global</div>
+        <div className="text-[11px] text-gray-400 dark:text-gray-500">Par defaut: portee de l'agent si disponible</div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -203,7 +207,11 @@ function PermissionScopeEditor({
             const nextId = defaultIdForType(nextType);
             setDraftType(nextType);
             setDraftId(nextId != null ? String(nextId) : "");
-            applyScope(nextType, nextId);
+            if (nextType === "GLOBAL" || nextId != null) {
+              applyScope(nextType, nextId);
+            } else {
+              clearGlobalScope();
+            }
           }}
           disabled={disabled}
         >
@@ -342,20 +350,21 @@ export default function PeopleAdmin() {
     setMetaLoading(true);
     setError("");
     try {
+      const canLoadOrgMeta = canAgents || canPerms;
       const [rRes, aRes, dirRes, depRes, srvRes, pRes] = await Promise.all([
         canRoles ? listRoles() : Promise.resolve({ success: true, data: [] }),
-        canAgents ? listAgents({ limit: 500 }) : Promise.resolve({ success: true, items: [] }),
-        canAgents ? listDirections() : Promise.resolve({ success: true, data: [] }),
-        canAgents ? listDepartements() : Promise.resolve({ success: true, data: [] }),
-        canAgents ? listServices() : Promise.resolve({ success: true, data: [] }),
+        canLoadOrgMeta ? listAgents({ limit: 500 }) : Promise.resolve({ success: true, items: [] }),
+        canLoadOrgMeta ? listDirections() : Promise.resolve({ success: true, data: [] }),
+        canLoadOrgMeta ? listDepartements() : Promise.resolve({ success: true, data: [] }),
+        canLoadOrgMeta ? listServices() : Promise.resolve({ success: true, data: [] }),
         canPerms ? listPermissions() : Promise.resolve({ success: true, data: [] }),
       ]);
 
       if (canRoles && !rRes?.success) throw new Error(rRes?.message || "Erreur chargement rôles");
-      if (canAgents && !aRes?.success) throw new Error(aRes?.message || "Erreur chargement agents");
-      if (canAgents && !dirRes?.success) throw new Error(dirRes?.message || "Erreur chargement directions");
-      if (canAgents && !depRes?.success) throw new Error(depRes?.message || "Erreur chargement départements");
-      if (canAgents && !srvRes?.success) throw new Error(srvRes?.message || "Erreur chargement services");
+      if (canLoadOrgMeta && !aRes?.success) throw new Error(aRes?.message || "Erreur chargement agents");
+      if (canLoadOrgMeta && !dirRes?.success) throw new Error(dirRes?.message || "Erreur chargement directions");
+      if (canLoadOrgMeta && !depRes?.success) throw new Error(depRes?.message || "Erreur chargement départements");
+      if (canLoadOrgMeta && !srvRes?.success) throw new Error(srvRes?.message || "Erreur chargement services");
       if (canPerms && !pRes?.success) throw new Error(pRes?.message || "Erreur chargement permissions");
 
       setRoles(canRoles ? (rRes?.data || rRes?.items || []) : []);
