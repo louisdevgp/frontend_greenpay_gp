@@ -12,11 +12,10 @@ import FullscreenLoader from "../../components/common/FullScreenLoader";
 import PdfPreviewModal from "../../components/common/PdfPreviewModal";
 import { emitToast } from "../../services/toastBus";
 import { createBudgetLine, listBudgetLines } from "../../services/budgetLines.service";
-import { formatMoney } from "../../utils/formatUtils";
+import { formatMoney, formatDateTime } from "../../utils/formatUtils";
 import { FIRMA_ENABLED } from "../../utils/firma";
 import {
   BUDGET_MONTHS,
-  budgetLineLabel,
   budgetLineOptionLabel,
   budgetWarningForAmount,
   formatBudgetWarning,
@@ -134,18 +133,19 @@ function controlComment(comments, key) {
   return comments[key] ? String(comments[key]) : "";
 }
 
-function budgetLineSummaryLabel(summary) {
-  const response = normalizeControlResponse(summary?.ligne_budgetaire_reponse ?? (summary?.lignes_budgetaires ? "OUI" : null));
-  if (response === "OUI") return budgetLineLabel(summary?.lignes_budgetaires);
-  return controlResponseLabel(response);
-}
-
 function formatBudgetOverrun(demande) {
   if (!demande || demande.budget_depassement_montant == null) return "-";
   const amount = Number(demande.budget_depassement_montant);
   if (!Number.isFinite(amount)) return "-";
   if (amount <= 0) return "Non";
   return `${formatMoney(amount)} ${demande.devise || "FCFA"}`;
+}
+
+function formatDafValidation(summary) {
+  const name = summary?.daf_validated_by_name ? String(summary.daf_validated_by_name).trim() : "";
+  const date = summary?.daf_validated_at ? formatDateTime(summary.daf_validated_at) : "";
+  if (name && date) return `${name} - ${date}`;
+  return name || date || "-";
 }
 
 export default function ValidationActionModal({ open, mode, item, onClose, onDone }) {
@@ -180,6 +180,9 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
     mode === "approve" &&
     isDga &&
     [
+      dafSummary?.motif,
+      dafSummary?.daf_validated_by_name,
+      dafSummary?.daf_validated_at,
       dafSummary?.validation_oci,
       dafSummary?.validation_oci_reponse,
       dafSummary?.paiement_immediat,
@@ -188,8 +191,6 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
       dafSummary?.budget_prevu_reponse,
       dafSummary?.budget_disponible,
       dafSummary?.budget_disponible_reponse,
-      dafSummary?.lignes_budgetaires,
-      dafSummary?.ligne_budgetaire_reponse,
       dafSummary?.budget_depassement_montant,
       dafSummary?.daf_critere4,
     ].some((value) => value !== null && value !== undefined && String(value).trim() !== "");
@@ -909,11 +910,12 @@ export default function ValidationActionModal({ open, mode, item, onClose, onDon
                 ) : null}
               </div>
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <DafSummaryItem label="Motif" value={dafSummary?.motif || demande?.motif || "-"} />
+                <DafSummaryItem label="Validation DAF" value={formatDafValidation(dafSummary)} />
                 <DafSummaryItem label="Validé par OCI" value={yesNoLabel(dafSummary?.validation_oci_reponse ?? dafSummary?.validation_oci)} comment={controlComment(dafSummaryComments, "validation_oci")} />
                 <DafSummaryItem label="Paiement immédiat" value={yesNoLabel(dafSummary?.paiement_immediat_reponse ?? dafSummary?.paiement_immediat)} comment={controlComment(dafSummaryComments, "paiement_immediat")} />
                 <DafSummaryItem label="Budget prévu" value={yesNoLabel(dafSummary?.budget_prevu_reponse ?? dafSummary?.budget_prevu)} comment={controlComment(dafSummaryComments, "budget_prevu")} />
                 <DafSummaryItem label="Budget dispo" value={yesNoLabel(dafSummary?.budget_disponible_reponse ?? dafSummary?.budget_disponible)} comment={controlComment(dafSummaryComments, "budget_disponible")} />
-                <DafSummaryItem label="Ligne budgétaire" value={budgetLineSummaryLabel(dafSummary)} comment={controlComment(dafSummaryComments, "ligne_budgetaire")} />
                 <DafSummaryItem label="Dépassement budgétaire" value={formatBudgetOverrun(dafSummary)} />
                 <DafSummaryItem label={DAF_CRITERE4_LABEL} value={normalizeDafCritere4Input(dafSummary?.daf_critere4) || "-"} />
               </div>
