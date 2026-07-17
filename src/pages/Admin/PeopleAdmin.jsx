@@ -98,6 +98,9 @@ function PermissionScopeEditor({
   departements = [],
   services = [],
   disabled,
+  defaultDirectionId = null,
+  defaultDepartementId = null,
+  defaultServiceId = null,
 }) {
   const [draftType, setDraftType] = useState("GLOBAL");
   const [draftId, setDraftId] = useState("");
@@ -118,9 +121,16 @@ function PermissionScopeEditor({
   const normalized = useMemo(() => normalizeScopeList(scopes), [scopes]);
   const showDefaultHint = normalized.length === 0;
 
-  const addScope = () => {
-    const type = normalizeScopeType(draftType) || "GLOBAL";
-    const id = type === "GLOBAL" ? null : normalizeScopeId(draftId);
+  const defaultIdForType = (type) => {
+    if (type === "DIRECTION") return normalizeScopeId(defaultDirectionId);
+    if (type === "DEPARTEMENT") return normalizeScopeId(defaultDepartementId);
+    if (type === "SERVICE") return normalizeScopeId(defaultServiceId);
+    return null;
+  };
+
+  const applyScope = (typeRaw, idRaw) => {
+    const type = normalizeScopeType(typeRaw) || "GLOBAL";
+    const id = type === "GLOBAL" ? null : normalizeScopeId(idRaw);
     if (type !== "GLOBAL" && id == null) return;
 
     if (type === "GLOBAL") {
@@ -134,6 +144,10 @@ function PermissionScopeEditor({
       next.push({ type, id });
     }
     onChange(next);
+  };
+
+  const addScope = () => {
+    applyScope(draftType, draftId);
   };
 
   const removeScope = (idx) => {
@@ -185,8 +199,11 @@ function PermissionScopeEditor({
           className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
           value={draftType}
           onChange={(e) => {
-            setDraftType(e.target.value);
-            setDraftId("");
+            const nextType = normalizeScopeType(e.target.value) || "GLOBAL";
+            const nextId = defaultIdForType(nextType);
+            setDraftType(nextType);
+            setDraftId(nextId != null ? String(nextId) : "");
+            applyScope(nextType, nextId);
           }}
           disabled={disabled}
         >
@@ -201,7 +218,10 @@ function PermissionScopeEditor({
           <select
             className="px-2 py-1 text-xs border border-gray-200 rounded-lg dark:border-gray-800 dark:bg-gray-950"
             value={draftId}
-            onChange={(e) => setDraftId(e.target.value)}
+            onChange={(e) => {
+              setDraftId(e.target.value);
+              applyScope(draftType, e.target.value);
+            }}
             disabled={disabled}
           >
             <option value="">Choisir...</option>
@@ -1056,6 +1076,9 @@ export default function PeopleAdmin() {
                                     directions={directions}
                                     departements={departements}
                                     services={services}
+                                    defaultDirectionId={selectedAgent?.direction_id}
+                                    defaultDepartementId={selectedAgent?.departement_id}
+                                    defaultServiceId={selectedAgent?.service_id}
                                     disabled={saving}
                                   />
                                 ) : null}
