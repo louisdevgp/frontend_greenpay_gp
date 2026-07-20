@@ -5,6 +5,7 @@ import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
 import Loader from "../../components/common/Loader";
 import ConfirmActionModal from "../../components/common/ConfirmActionModal";
+import Pagination from "../../components/common/Pagination";
 import { Modal } from "../../components/ui/modal";
 import { useAuth } from "../../context/AuthContext";
 import { emitToast } from "../../services/toastBus";
@@ -28,6 +29,7 @@ const CURRENT_MONTH = new Date().getMonth() + 1;
 const EXERCICE_OPTIONS = Array.from({ length: 8 }, (_, index) => CURRENT_YEAR + 2 - index);
 const STORAGE_KEY = "filters:budget:lignes";
 const INITIAL_FILTERS = { q: "", exercice: String(CURRENT_YEAR), mois: "", statut: "" };
+const INITIAL_PAGE_SIZE = 10;
 
 function initialForm() {
   return {
@@ -59,6 +61,15 @@ export default function BudgetLinesList() {
     const saved = loadPersistedState(STORAGE_KEY, { filters: INITIAL_FILTERS });
     return { ...INITIAL_FILTERS, ...(saved?.filters || {}) };
   });
+  const [page, setPage] = useState(() => {
+    const saved = loadPersistedState(STORAGE_KEY, { page: 1 });
+    return Math.max(1, Number(saved?.page || 1));
+  });
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = loadPersistedState(STORAGE_KEY, { pageSize: INITIAL_PAGE_SIZE });
+    return Math.max(1, Number(saved?.pageSize || INITIAL_PAGE_SIZE));
+  });
+  const [total, setTotal] = useState(0);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -70,20 +81,28 @@ export default function BudgetLinesList() {
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewTarget, setRenewTarget] = useState(null);
 
+  const buildFilterParams = () => {
+    const params = {};
+    if (filters.q) params.q = filters.q;
+    if (filters.exercice) params.exercice = filters.exercice;
+    if (filters.mois) params.mois = filters.mois;
+    if (filters.statut) params.statut = filters.statut;
+    return params;
+  };
+
   const fetchAll = async () => {
     setLoading(true);
     setError("");
     try {
-      const params = {};
-      if (filters.q) params.q = filters.q;
-      if (filters.exercice) params.exercice = filters.exercice;
-      if (filters.mois) params.mois = filters.mois;
-      if (filters.statut) params.statut = filters.statut;
+      const params = { ...buildFilterParams(), page, limit: pageSize };
       const res = await listBudgetLines(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement lignes budgetaires");
-      setRows(Array.isArray(res.data) ? res.data : []);
+      const list = Array.isArray(res.data) ? res.data : [];
+      setRows(list);
+      setTotal(Number(res.total ?? list.length));
     } catch (e) {
       setRows([]);
+      setTotal(0);
       setError(e?.message || "Erreur chargement lignes budgetaires");
     } finally {
       setLoading(false);
@@ -92,7 +111,7 @@ export default function BudgetLinesList() {
 
   useEffect(() => {
     fetchAll();
-  }, [filters]);
+  }, [filters, page, pageSize]);
 
   useEffect(() => {
     let active = true;
@@ -151,17 +170,29 @@ export default function BudgetLinesList() {
   const updateFilter = (key, value) => {
     const nextFilters = { ...filters, [key]: value };
     setFilters(nextFilters);
-    savePersistedState(STORAGE_KEY, { filters: nextFilters });
+    setPage(1);
+    savePersistedState(STORAGE_KEY, { filters: nextFilters, page: 1, pageSize });
   };
 
   const resetFilters = () => {
     setFilters(INITIAL_FILTERS);
-    savePersistedState(STORAGE_KEY, { filters: INITIAL_FILTERS });
+    setPage(1);
+    savePersistedState(STORAGE_KEY, { filters: INITIAL_FILTERS, page: 1, pageSize });
   };
 
   const clearSavedFilters = () => {
     clearPersistedState(STORAGE_KEY);
     setFilters(INITIAL_FILTERS);
+    setPage(1);
+    setPageSize(INITIAL_PAGE_SIZE);
+  };
+
+  const updatePagination = (nextPage, nextPageSize) => {
+    const safePage = Math.max(1, Number(nextPage || 1));
+    const safePageSize = Math.max(1, Number(nextPageSize || INITIAL_PAGE_SIZE));
+    setPage(safePage);
+    setPageSize(safePageSize);
+    savePersistedState(STORAGE_KEY, { filters, page: safePage, pageSize: safePageSize });
   };
 
   const openEdit = (row) => {
@@ -285,10 +316,13 @@ export default function BudgetLinesList() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     const dateTag = new Date().toISOString().slice(0, 10);
+    const res = await listBudgetLines(buildFilterParams());
+    if (!res?.success) throw new Error(res?.message || "Erreur export lignes budgetaires");
+    const exportRows = Array.isArray(res.data) ? res.data : [];
     exportRowsToExcel({
-      rows,
+      rows: exportRows,
       filename: `lignes_budgetaires_${dateTag}.xlsx`,
       sheetName: "Budget",
       columns: [
@@ -322,7 +356,7 @@ export default function BudgetLinesList() {
           <div className="flex flex-wrap items-center gap-2">
             <ExportButton
               onExport={handleExport}
-              disabled={!rows.length}
+              disabled={!total}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg dark:border-gray-800 disabled:opacity-60"
             />
             <button
@@ -511,6 +545,15 @@ export default function BudgetLinesList() {
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={(nextPage) => updatePagination(nextPage, pageSize)}
+          onPageSizeChange={(nextPageSize) => updatePagination(1, nextPageSize)}
+          isLoading={loading}
+        />
       </div>
 
       <BudgetLineModal

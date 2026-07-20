@@ -207,6 +207,12 @@ export default function ReceptionsList({ mode = "all" }) {
     savePersistedState(storageKey, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
 
+  const clearFilters = () => {
+    clearPersistedState(storageKey);
+    const newState = { ...initialState, page: 1 };
+    setState(newState);
+  };
+
   const updateFilter = (key, value) => {
     const newFilters = { ...state.filters, [key]: value };
     const newState = { ...state, filters: newFilters, page: 1 }; // Reset page when filter changes
@@ -378,7 +384,7 @@ export default function ReceptionsList({ mode = "all" }) {
             Réinitialiser
           </button>
           <button
-            onClick={clearPersistedState.bind(null, storageKey)}
+            onClick={clearFilters}
             className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
             Effacer filtres

@@ -127,6 +127,12 @@ export default function ValidationsDone() {
     savePersistedState(STORAGE_KEY, { filters: newState.filters, page: newState.page, pageSize: newState.pageSize });
   };
 
+  const clearFilters = () => {
+    clearPersistedState(STORAGE_KEY);
+    const newState = { ...initialState, page: 1 };
+    setState(newState);
+  };
+
   const updateFilter = (key, value) => {
     // Si value est une chaîne, c'est probablement un événement de champ de formulaire
     // Si c'est autre chose, on suppose que c'est la valeur directe
@@ -302,7 +308,7 @@ export default function ValidationsDone() {
             Réinitialiser
           </button>
           <button
-            onClick={clearPersistedState.bind(null, STORAGE_KEY)}
+            onClick={clearFilters}
             className="px-3 py-2 text-sm border border-gray-200 rounded-lg dark:border-gray-800"
           >
             Effacer filtres
