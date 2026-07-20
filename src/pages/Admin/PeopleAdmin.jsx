@@ -253,7 +253,7 @@ function PermissionScopeEditor({
 
       {showDefaultHint && (
         <div className="text-[11px] text-gray-400 dark:text-gray-500">
-          Ajoute un scope pour restreindre. Sinon, acces global.
+          Sans scope explicite, la portee de l'agent est utilisee si disponible.
         </div>
       )}
     </div>

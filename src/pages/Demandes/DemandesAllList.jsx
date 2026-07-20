@@ -77,6 +77,10 @@ function getRoleViewLabel(roleView, scopes = []) {
 
 export default function DemandesAllList() {
   const { user, hasPermission } = useAuth();
+  const roles = useMemo(() => (user?.roles || []).map((r) => String(r).toUpperCase()), [user?.roles]);
+  const canUseGlobalView = roles.some((r) => ["ADMIN", "DG", "DGA", "DAF", "COMPTABLE", "CAISSE"].includes(r));
+  const agentDirectionId = user?.agent?.direction_id ?? user?.agent?.directionId ?? null;
+  const hasDirectionFallback = hasPermission("DEMANDE_LIST") && agentDirectionId != null;
   const listScopes = useMemo(
     () =>
       collectScopesForPermissions(user, [
@@ -86,8 +90,15 @@ export default function DemandesAllList() {
       ]),
     [user]
   );
-  const canGlobal = hasGlobalScope(listScopes);
-  const canScoped = hasOrgScope(listScopes);
+  const effectiveListScopes = useMemo(() => {
+    const scopes = [...listScopes];
+    if (hasDirectionFallback && !hasOrgScope(scopes)) {
+      scopes.push({ type: "DIRECTION", id: Number(agentDirectionId) });
+    }
+    return scopes;
+  }, [listScopes, hasDirectionFallback, agentDirectionId]);
+  const canGlobal = canUseGlobalView && hasGlobalScope(listScopes);
+  const canScoped = hasOrgScope(effectiveListScopes);
   const canSelf = hasPermission("DEMANDE_LIST_SELF");
   const allowedRoleViews = useMemo(
     () => getAllowedRoleViews({ canGlobal, canScoped, canSelf }),
@@ -216,7 +227,7 @@ export default function DemandesAllList() {
           <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Toutes les demandes</h1>
           {showRoleView && state.filters.roleView && (
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Vue: {getRoleViewLabel(state.filters.roleView, listScopes)}
+              Vue: {getRoleViewLabel(state.filters.roleView, effectiveListScopes)}
             </p>
           )}
         </div>
