@@ -98,8 +98,12 @@ export default function BudgetLinesList() {
       const res = await listBudgetLines(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement lignes budgetaires");
       const list = Array.isArray(res.data) ? res.data : [];
-      setRows(list);
-      setTotal(Number(res.total ?? list.length));
+      const hasServerPagination = res.total !== undefined && res.total !== null;
+      const visibleRows = hasServerPagination
+        ? list
+        : list.slice((page - 1) * pageSize, page * pageSize);
+      setRows(visibleRows);
+      setTotal(Number(hasServerPagination ? res.total : list.length));
     } catch (e) {
       setRows([]);
       setTotal(0);
