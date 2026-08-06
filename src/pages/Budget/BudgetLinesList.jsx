@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FiCopy, FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from "react-icons/fi";
+import { FiCheckSquare, FiCopy, FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from "react-icons/fi";
 import PageMeta from "../../components/common/PageMeta";
 import ExportButton from "../../components/common/ExportButton";
 import FullscreenLoader from "../../components/common/FullScreenLoader";
@@ -17,6 +17,7 @@ import {
   deleteBudgetLine,
   listBudgetLines,
   renewBudgetLine,
+  renewBudgetLines,
   updateBudgetLine,
 } from "../../services/budgetLines.service";
 import { exportRowsToExcel } from "../../utils/excelExport";
@@ -29,6 +30,7 @@ const CURRENT_MONTH = new Date().getMonth() + 1;
 const EXERCICE_OPTIONS = Array.from({ length: 8 }, (_, index) => CURRENT_YEAR + 2 - index);
 const STORAGE_KEY = "filters:budget:lignes";
 const INITIAL_FILTERS = { q: "", exercice: String(CURRENT_YEAR), mois: "", statut: "" };
+const EMPTY_FILTERS = { q: "", exercice: "", mois: "", statut: "" };
 const INITIAL_PAGE_SIZE = 10;
 
 function initialForm() {
@@ -80,6 +82,8 @@ export default function BudgetLinesList() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewTarget, setRenewTarget] = useState(null);
+  const [bulkRenewOpen, setBulkRenewOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
 
   const buildFilterParams = () => {
     const params = {};
@@ -97,13 +101,17 @@ export default function BudgetLinesList() {
       const params = { ...buildFilterParams(), page, limit: pageSize };
       const res = await listBudgetLines(params);
       if (!res?.success) throw new Error(res?.message || "Erreur chargement lignes budgetaires");
-      const list = Array.isArray(res.data) ? res.data : [];
-      const hasServerPagination = res.total !== undefined && res.total !== null;
-      const visibleRows = hasServerPagination
-        ? list
-        : list.slice((page - 1) * pageSize, page * pageSize);
+      const payload = res.data;
+      const list = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+      const serverTotal = res.total ?? res.pagination?.total ?? payload?.total ?? payload?.pagination?.total;
+      const hasServerPagination = serverTotal !== undefined && serverTotal !== null;
+      const visibleRows = hasServerPagination ? list : list.slice((page - 1) * pageSize, page * pageSize);
+      const nextTotal = Number(hasServerPagination ? serverTotal : list.length);
       setRows(visibleRows);
-      setTotal(Number(hasServerPagination ? res.total : list.length));
+      setTotal(Number.isFinite(nextTotal) ? nextTotal : 0);
+      setSelectedIds((prev) =>
+        prev.filter((id) => visibleRows.some((row) => String(row.id) === String(id)))
+      );
     } catch (e) {
       setRows([]);
       setTotal(0);
@@ -116,6 +124,11 @@ export default function BudgetLinesList() {
   useEffect(() => {
     fetchAll();
   }, [filters, page, pageSize]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil((Number(total) || 0) / pageSize));
+    if (page > totalPages) updatePagination(totalPages, pageSize);
+  }, [total, page, pageSize]);
 
   useEffect(() => {
     let active = true;
@@ -165,6 +178,10 @@ export default function BudgetLinesList() {
     );
   }, [rows]);
 
+  const selectedIdSet = useMemo(() => new Set(selectedIds.map((id) => String(id))), [selectedIds]);
+  const visibleIds = useMemo(() => rows.map((row) => String(row.id)).filter(Boolean), [rows]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIdSet.has(id));
+
   const openCreate = () => {
     setEditing(null);
     setForm(initialForm());
@@ -186,9 +203,11 @@ export default function BudgetLinesList() {
 
   const clearSavedFilters = () => {
     clearPersistedState(STORAGE_KEY);
-    setFilters(INITIAL_FILTERS);
+    setFilters(EMPTY_FILTERS);
     setPage(1);
     setPageSize(INITIAL_PAGE_SIZE);
+    setSelectedIds([]);
+    savePersistedState(STORAGE_KEY, { filters: EMPTY_FILTERS, page: 1, pageSize: INITIAL_PAGE_SIZE });
   };
 
   const updatePagination = (nextPage, nextPageSize) => {
@@ -303,6 +322,19 @@ export default function BudgetLinesList() {
     setRenewOpen(true);
   };
 
+  const toggleRowSelection = (row) => {
+    const id = row?.id != null ? String(row.id) : "";
+    if (!id) return;
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const toggleVisibleSelection = () => {
+    setSelectedIds((prev) => {
+      if (allVisibleSelected) return prev.filter((id) => !visibleIds.includes(String(id)));
+      return Array.from(new Set([...prev, ...visibleIds]));
+    });
+  };
+
   const confirmRenew = async () => {
     if (!renewTarget?.id && !renewTarget?.uuid) return;
     setSaving(true);
@@ -317,6 +349,30 @@ export default function BudgetLinesList() {
       setSaving(false);
       setRenewOpen(false);
       setRenewTarget(null);
+    }
+  };
+
+  const confirmBulkRenew = async () => {
+    if (!selectedIds.length) return;
+    setSaving(true);
+    try {
+      const res = await renewBudgetLines({ ids: selectedIds });
+      if (!res?.success) throw new Error(res?.message || "Erreur reconduction lignes budgetaires");
+      const result = res.data || {};
+      const createdCount = Array.isArray(result.created) ? result.created.length : 0;
+      const skippedCount = Array.isArray(result.skipped) ? result.skipped.length : 0;
+      const errorsCount = Array.isArray(result.errors) ? result.errors.length : 0;
+      emitToast({
+        variant: createdCount ? "success" : "warning",
+        message: `${createdCount} ligne(s) reconduite(s)${skippedCount ? `, ${skippedCount} ignoree(s)` : ""}${errorsCount ? `, ${errorsCount} erreur(s)` : ""}`,
+      });
+      setSelectedIds([]);
+      await fetchAll();
+    } catch (e) {
+      emitToast({ variant: "error", message: e?.message || "Erreur reconduction lignes budgetaires" });
+    } finally {
+      setSaving(false);
+      setBulkRenewOpen(false);
     }
   };
 
@@ -358,6 +414,18 @@ export default function BudgetLinesList() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canCreate ? (
+              <button
+                type="button"
+                onClick={() => setBulkRenewOpen(true)}
+                disabled={!selectedIds.length}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg disabled:opacity-60 dark:border-gray-800"
+                title="Reconduire les lignes selectionnees"
+              >
+                <FiCheckSquare />
+                Reconduire ({selectedIds.length})
+              </button>
+            ) : null}
             <ExportButton
               onExport={handleExport}
               disabled={!total}
@@ -463,6 +531,15 @@ export default function BudgetLinesList() {
           <table className="w-full min-w-[980px] text-sm">
             <thead>
               <tr className="text-left text-gray-500 dark:text-gray-400">
+                <th className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleVisibleSelection}
+                    disabled={!rows.length}
+                    aria-label="Selectionner les lignes visibles"
+                  />
+                </th>
                 <th className="px-4 py-3">Ligne</th>
                 <th className="px-4 py-3">Periode</th>
                 <th className="px-4 py-3 text-right">Initial</th>
@@ -478,7 +555,7 @@ export default function BudgetLinesList() {
             <tbody>
               {!rows.length ? (
                 <tr>
-                  <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={10}>
+                  <td className="px-4 py-4 text-gray-500 dark:text-gray-400" colSpan={11}>
                     Aucune ligne budgetaire.
                   </td>
                 </tr>
@@ -487,6 +564,14 @@ export default function BudgetLinesList() {
                   const solde = budgetLineSolde(row);
                   return (
                     <tr key={row.id} className="border-t border-gray-100 dark:border-gray-800">
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedIdSet.has(String(row.id))}
+                          onChange={() => toggleRowSelection(row)}
+                          aria-label={`Selectionner ${row.code || "ligne"}`}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900 dark:text-white/90">{row.code}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">{row.libelle}</div>
@@ -589,6 +674,19 @@ export default function BudgetLinesList() {
           setDeleteTarget(null);
         }}
         onConfirm={confirmDelete}
+      />
+
+      <ConfirmActionModal
+        open={bulkRenewOpen}
+        title="Reconduire les lignes selectionnees"
+        message={`Creer une nouvelle ligne pour le mois suivant pour ${selectedIds.length} ligne(s) selectionnee(s) ? Le budget initial sera repris, sans reporter le solde restant.`}
+        confirmLabel="Reconduire"
+        loading={saving}
+        onClose={() => {
+          if (saving) return;
+          setBulkRenewOpen(false);
+        }}
+        onConfirm={confirmBulkRenew}
       />
 
       <ConfirmActionModal

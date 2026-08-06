@@ -74,10 +74,12 @@ function normalizeResponsePayload(payload) {
 
   // already the canonical shape
   if (Object.prototype.hasOwnProperty.call(payload, "success") && Object.prototype.hasOwnProperty.call(payload, "data")) {
+    const { success, message, data, ...rest } = payload;
     return {
-      success: Boolean(payload.success),
-      message: payload.message ?? "OK",
-      data: payload.data,
+      success: Boolean(success),
+      message: message ?? "OK",
+      data,
+      ...rest,
     };
   }
 

@@ -25,6 +25,11 @@ export async function renewBudgetLine(idOrUuid, payload = {}) {
   return res.data;
 }
 
+export async function renewBudgetLines(payload = {}) {
+  const res = await api.post("/budget-lines/renew", payload);
+  return res.data;
+}
+
 export async function deleteBudgetLine(idOrUuid) {
   const res = await api.delete(`/budget-lines/${idOrUuid}`);
   return res.data;
