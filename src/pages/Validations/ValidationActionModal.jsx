@@ -22,7 +22,7 @@ import {
   formatBudgetWarning,
 } from "../../utils/budgetLines";
 
-const DAF_CRITERE4_LABEL = import.meta.env.VITE_DAF_CRITERE4_LABEL || "Moyen de paiement";
+const DAF_CRITERE4_LABEL = "Moyen de paiement";
 const CURRENT_YEAR = new Date().getFullYear();
 const CURRENT_MONTH = new Date().getMonth() + 1;
 const EXERCICE_OPTIONS = Array.from({ length: 8 }, (_, index) => CURRENT_YEAR + 2 - index);
