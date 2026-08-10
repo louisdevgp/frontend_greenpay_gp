@@ -96,6 +96,28 @@ function normalizeRoleName(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+const ROLE_IMPLICATIONS = {
+  DG: ["DIRECTEUR"],
+  DGA: ["DIRECTEUR"],
+  DAF: ["DIRECTEUR"],
+};
+
+function expandRoles(roleNames = []) {
+  const out = new Set((roleNames || []).map(normalizeRoleName).filter(Boolean));
+  for (const role of Array.from(out)) {
+    for (const implied of ROLE_IMPLICATIONS[role] || []) {
+      out.add(normalizeRoleName(implied));
+    }
+  }
+  return Array.from(out);
+}
+
+function roleCoversStep(roleName, stepRole) {
+  const target = normalizeRoleName(stepRole);
+  if (!target) return false;
+  return expandRoles([roleName]).includes(target);
+}
+
 function normalizeValidationStopRole(value) {
   if (!value) return null;
   const v = String(value).trim().toUpperCase();
@@ -346,7 +368,7 @@ export default function DemandeDetail() {
     return sorted[0] || null;
   }, [effectiveValidationSteps]);
 
-  const delegatedRoles = (user?.delegatedRoles || []).map((r) => String(r).toUpperCase());
+  const delegatedRoles = expandRoles(user?.delegatedRoles || []);
   const canViewDafValidationFields =
     isAdmin ||
     roles.includes("DAF") ||
@@ -378,14 +400,14 @@ export default function DemandeDetail() {
       const validatorId = pendingValidationStep?.validator_id != null ? Number(pendingValidationStep.validator_id) : null;
       return delegations.some((d) => {
         const roleName = normalizeRoleName(d?.role_name);
-        if (!roleName || roleName !== pendingRole) return false;
+        if (!roleName || !roleCoversStep(roleName, pendingRole)) return false;
         if (validatorId != null && Number(d?.principal_id) !== validatorId) return false;
         const scope = d?.scope != null && String(d.scope).trim() !== "" ? String(d.scope).trim() : null;
         if (scope && !candidateScopes.includes(scope)) return false;
         return true;
       });
     }
-    return pendingRole && delegatedRoles.includes(pendingRole);
+    return pendingRole && delegatedRoles.some((roleName) => roleCoversStep(roleName, pendingRole));
   }, [pendingValidationStep, pendingRole, user?.agent?.delegations, candidateScopes, delegatedRoles]);
   const canActOnPendingStep = !!pendingValidationStep && (canActByAssignment || canActByDelegation);
   const canApprovePending = canActOnPendingStep && hasPermission("VALIDATION_APPROVE");
