@@ -409,10 +409,31 @@ export default function DemandeDetail() {
     }
     return pendingRole && delegatedRoles.some((roleName) => roleCoversStep(roleName, pendingRole));
   }, [pendingValidationStep, pendingRole, user?.agent?.delegations, candidateScopes, delegatedRoles]);
-  const canActOnPendingStep = !!pendingValidationStep && (canActByAssignment || canActByDelegation);
-  const canApprovePending = canActOnPendingStep && hasPermission("VALIDATION_APPROVE");
-  const canRejectPending = canActOnPendingStep && hasPermission("VALIDATION_REJECT");
-  const canReturnPending = canActOnPendingStep && hasPermission("VALIDATION_RETURN_FOR_MODIFICATION");
+  const serverValidationAccess = demande?.current_validation_access || null;
+  const serverAccessMatchesPending =
+    !!pendingValidationStep &&
+    !!serverValidationAccess &&
+    (Number(serverValidationAccess.step_id) === Number(pendingValidationStep.id) ||
+      (serverValidationAccess.step_uuid &&
+        String(serverValidationAccess.step_uuid) === String(pendingValidationStep.uuid)));
+  const canActFromServer = serverAccessMatchesPending && serverValidationAccess.can_act === true;
+  const isActingByDelegation =
+    canActByDelegation ||
+    (serverAccessMatchesPending && serverValidationAccess.by_delegation === true);
+  const canActOnPendingStep =
+    !!pendingValidationStep && (canActFromServer || canActByAssignment || canActByDelegation);
+  const canApprovePending =
+    canActOnPendingStep &&
+    ((serverAccessMatchesPending && serverValidationAccess.can_approve === true) ||
+      hasPermission("VALIDATION_APPROVE"));
+  const canRejectPending =
+    canActOnPendingStep &&
+    ((serverAccessMatchesPending && serverValidationAccess.can_reject === true) ||
+      hasPermission("VALIDATION_REJECT"));
+  const canReturnPending =
+    canActOnPendingStep &&
+    ((serverAccessMatchesPending && serverValidationAccess.can_return === true) ||
+      hasPermission("VALIDATION_RETURN_FOR_MODIFICATION"));
   const showValidationActions = canApprovePending || canRejectPending || canReturnPending;
   const refreshTriedRef = useRef(false);
   useEffect(() => {
@@ -433,7 +454,9 @@ export default function DemandeDetail() {
     canUpdateDemande &&
     canEditRole &&
     !!pendingValidationStep &&
-    (canActByAssignment || canActByDelegation || (isDirectorPending && isDirectorSameDirection));
+    (canActByAssignment ||
+      isActingByDelegation ||
+      (isDirectorPending && isDirectorSameDirection));
   const canEdit = useMemo(() => {
     if (!demande || !user) return false;
     const isAModifier = String(demande.statut).toLowerCase() === "a_modifier";
@@ -1948,7 +1971,7 @@ export default function DemandeDetail() {
                   Étape en attente: {pendingValidationStep.role_name || "-"} (niveau {pendingValidationStep.level ?? "-"})
                 </div>
               ) : null}
-              {canActByDelegation && !canActByAssignment ? (
+              {isActingByDelegation && !canActByAssignment ? (
                 <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-300">
                   Vous agissez par délégation.
                 </div>
